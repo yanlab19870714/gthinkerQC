@@ -161,6 +161,7 @@ struct WorkerParams {
     }
 };
 
+void* big_task_queue;
 //============================
 //general types
 typedef int VertexID;

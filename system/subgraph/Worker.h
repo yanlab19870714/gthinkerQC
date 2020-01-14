@@ -65,6 +65,11 @@ public:
 
     typedef Trimmer<VertexT> TrimmerT;
 
+    typedef deque<TaskT*> TaskQueue;
+
+    mutex bigtask_que_lock;
+
+
     //=======================================================
     //worker's data structures
     HashT hash;
@@ -82,6 +87,9 @@ public:
 
     Comper* compers; //dynamic array of compers
 
+    TaskQueue& q_bigtask(){// get the global big task queue
+    	return *(TaskQueue *)big_task_queue;
+    }
     //=======================================================
     //Trimmer
     void setTrimmer(TrimmerT* trimmer)
@@ -100,6 +108,8 @@ public:
     	REPORT_DIR = report_path;
     	_mkdir(REPORT_DIR.c_str());
     	//------
+    	//create global big task queue
+    	big_task_queue = new TaskQueue;
     	global_end_label = false;
     	local_idle = false;
     	global_trimmer = NULL;
@@ -138,6 +148,7 @@ public:
 		delete[] idle_set;
 		delete[] req_counter;
 		delete cache_table;
+		delete (TaskQueue *)big_task_queue;
 		//ToDo: release aggregator
         if (global_agg != NULL)
             delete (FinalT*)global_agg;
