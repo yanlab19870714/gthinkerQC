@@ -266,9 +266,9 @@ public:
     void add_task(TaskT * task)
     {
     	if (task->is_bigtask()){
+    		TaskQueue& btq = q_bigtask();
     		unique_lock<mutex> lck(bigtask_que_lock);
     		//get the ref of global big task queue
-    		TaskQueue& btq = q_bigtask();
     		if (btq.size() == BIG_TASK_QUEUE_CAPACITY){
     			set_bigTask_fname();
     			ifbinstream bigTask_out(fname);
