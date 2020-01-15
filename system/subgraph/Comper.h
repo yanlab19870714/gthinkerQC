@@ -254,6 +254,8 @@ public:
         	strcpy(fname, TASK_DISK_BUFFER_DIR.c_str());
         	sprintf(num, "/bt_%d_", _my_rank);
         	strcat(fname, num);
+        	sprintf(num, "%d_", thread_rank);
+        	strcat(fname, num);
         	sprintf(num, "%lld", bigFileSeqNo);
         	strcat(fname, num);
         	bigFileSeqNo++;
