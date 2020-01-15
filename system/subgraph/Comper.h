@@ -62,6 +62,10 @@ public:
 
     thread main_thread;
 
+    TaskQueue& q_bigtask(){// get the global big task queue
+        	return *(TaskQueue *)big_task_queue;
+    }
+
     //UDF1
     virtual void task_spawn(VertexT * v) = 0; //call add_task() inside, will flush tasks to disk if queue overflows
     //UDF2
@@ -243,35 +247,71 @@ public:
     	fileSeqNo++;
     }
 
+    //set name for big task file
+    long long bigFileSeqNo = 1;
+    void set_bigTask_fname()
+        {
+        	strcpy(fname, TASK_DISK_BUFFER_DIR.c_str());
+        	sprintf(num, "/bt_%d_", _my_rank);
+        	strcat(fname, num);
+        	sprintf(num, "%lld", bigFileSeqNo);
+        	strcat(fname, num);
+        	bigFileSeqNo++;
+        }
+
     //tasks are added to q_task only through this function !!!
     //it flushes tasks as a file to disk when q_task's size goes beyond 3 * TASK_BATCH_NUM
     void add_task(TaskT * task)
     {
-    	if(q_task.size() == 3 * TASK_BATCH_NUM)
-    	{
-    		set_fname();
-    		ifbinstream out(fname);
-    		//------
-    		while(q_task.size() > 2 * TASK_BATCH_NUM)
-    		{
-    			//get task at the tail
-    			TaskT * t = q_task.back();
-    			q_task.pop_back();
-    			//stream to file
-    			out << t;
-    			//release from memory
-    			delete t;
+    	if (task->is_bigtask()){
+    		unique_lock<mutex> lck(bigtask_que_lock);
+    		//get the ref of global big task queue
+    		TaskQueue& btq = q_bigtask();
+    		if (btq.size() == BIG_TASK_QUEUE_CAPACITY){
+    			set_bigTask_fname();
+    			ifbinstream bigTask_out(fname);
+    			int i = 0;
+    			while(i < BIG_TASK_FLUSH_BATCH)
+				{
+					//get task at the tail
+					TaskT * t = btq.back();
+					btq.pop_back();
+					//stream to file
+					bigTask_out << t;
+					//release from memory
+					delete t;
+					i++;
+				}
+    			bigTask_out.close();
+    			global_bigTask_fileList.enqueue(fname);
     		}
-    		out.close();
-    		//------
-    		//register with "global_file_list"
-    		global_file_list.enqueue(fname);
-    		global_file_num ++;
+    		btq.push_back(task);
+    	}else{
+    		if(q_task.size() == 3 * TASK_BATCH_NUM){
+				set_fname();
+				ifbinstream out(fname);
+				//------
+				while(q_task.size() > 2 * TASK_BATCH_NUM)
+				{
+					//get task at the tail
+					TaskT * t = q_task.back();
+					q_task.pop_back();
+					//stream to file
+					out << t;
+					//release from memory
+					delete t;
+				}
+				out.close();
+				//------
+				//register with "global_file_list"
+				global_file_list.enqueue(fname);
+				global_file_num ++;
+			}
+			//--- deprecated:
+			//task->comper = this;//important !!! set task.comper before entering processing
+			//---------------
+			q_task.push_back(task);
     	}
-    	//--- deprecated:
-    	//task->comper = this;//important !!! set task.comper before entering processing
-    	//---------------
-    	q_task.push_back(task);
     }
 
     //part 1's logic: fetch a task from task-map's "task_buf", process it, and add to q_task (flush to disk if necessary)

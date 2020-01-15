@@ -67,9 +67,6 @@ public:
 
     typedef deque<TaskT*> TaskQueue;
 
-    mutex bigtask_que_lock;
-
-
     //=======================================================
     //worker's data structures
     HashT hash;
