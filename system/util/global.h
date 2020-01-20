@@ -170,6 +170,8 @@ conque<string> global_bigTask_fileList;
 
 void* big_task_queue;
 mutex bigtask_que_lock;
+
+void* big_map_task;
 //============================
 //general types
 typedef int VertexID;

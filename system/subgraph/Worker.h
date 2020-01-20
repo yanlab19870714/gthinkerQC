@@ -87,6 +87,10 @@ public:
     TaskQueue& q_bigtask(){// get the global big task queue
     	return *(TaskQueue *)big_task_queue;
     }
+
+    TaskMapT& get_big_maptask(){// get the global big map_task
+        	return *(TaskMapT *)big_map_task;
+    }
     //=======================================================
     //Trimmer
     void setTrimmer(TrimmerT* trimmer)
@@ -105,8 +109,11 @@ public:
     	REPORT_DIR = report_path;
     	_mkdir(REPORT_DIR.c_str());
     	//------
-    	//create global big task queue
+    	//create global big task queue, table and buffer
     	big_task_queue = new TaskQueue;
+    	big_map_task = new TaskMapT;
+    	get_big_maptask().thread_rank = num_compers;
+
     	global_end_label = false;
     	local_idle = false;
     	global_trimmer = NULL;
@@ -146,6 +153,7 @@ public:
 		delete[] req_counter;
 		delete cache_table;
 		delete (TaskQueue *)big_task_queue;
+		delete (TaskMapT *)big_map_task;
 		//ToDo: release aggregator
         if (global_agg != NULL)
             delete (FinalT*)global_agg;

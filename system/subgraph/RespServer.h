@@ -51,6 +51,10 @@ public:
 	//thread_counter counter; //used for trim-to-vcache-limit
 	thread main_thread;
 
+	TaskMapT& get_big_maptask(){// get the global big map_task
+	        	return *(TaskMapT *)big_map_task;
+	}
+
 	void thread_func(char * buf, int size, int mpi_src)
 	{
 		//get Comper objects of all threads
@@ -75,9 +79,13 @@ public:
 			{
 				long long task_id = tid_collector[i];
 				int thread_id = (task_id >> 48);
-				//get the thread's Comper object
-				TaskMapT* tmap = taskmap_vec[thread_id];
-				tmap->update(task_id); //add the task's counter, move to conque if ready (to be fetched by Comper)
+				//check whether it is a big task
+				if(thread_id == num_compers) //get big map_task
+					get_big_maptask().update(task_id);
+				else{ //get thread's Comper map_task
+					TaskMapT* tmap = taskmap_vec[thread_id];
+					tmap->update(task_id); //add the task's counter, move to conque if ready (to be fetched by Comper)
+				}
 			}
 			req_counter[mpi_src]--;
 		}
