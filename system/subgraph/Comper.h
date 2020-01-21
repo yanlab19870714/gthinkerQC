@@ -235,7 +235,7 @@ public:
     	TaskT * task;
     	if(btq.size() != 0)
     	{
-    		//fetch task from big task queue head
+    		//fetch big task from big task queue head
     		task = btq.front();
     		btq.pop_front();
     	}else
@@ -260,14 +260,22 @@ public:
 				}
 			}
 			//==================================
-			if(q_task.size() == 0){
-				if(task_spawn_called) return true;
-				else if(push_called) return true;
-				else return false;
+			if(btq.size() != 0)
+			{
+				//fetch big task from big task queue head
+				task = btq.front();
+				btq.pop_front();
+			}else{
+				if(q_task.size() == 0)
+				{
+					if(task_spawn_called) return true;
+					else if(push_called) return true;
+					else return false;
+				}
+				//fetch task from Comper's task queue head
+				task = q_task.front();
+				q_task.pop_front();
 			}
-			//fetch task from Comper's task queue head
-			task = q_task.front();
-			q_task.pop_front();
     	}
 
     	//task.to_pull should've been set
