@@ -66,6 +66,10 @@ public:
         	return *(TaskQueue *)big_task_queue;
     }
 
+    TaskMapT& get_big_maptask(){// get the global big map_task
+            	return *(TaskMapT *)big_map_task;
+        }
+
     //UDF1
     virtual void task_spawn(VertexT * v) = 0; //call add_task() inside, will flush tasks to disk if queue overflows
     //UDF2
@@ -217,7 +221,8 @@ public:
     	//init-ed to be true since:
     	//1. if it is newly spawned, should allow it to run
     	//2. if compute(.) returns false, should be filtered already, won't be popped
-    	while(task->pull_all(counter, map_task)) //may call add2map(.)
+    	TaskMapT& pop_map_task = task->is_bigtask() ? get_big_maptask() : map_task;
+    	while(task->pull_all(counter, pop_map_task)) //may call add2map(.)
     	{
     		go = compute(task);
     		task->unlock_all();
