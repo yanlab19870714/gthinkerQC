@@ -226,7 +226,8 @@ public:
 		compers = new Comper[num_compers];
 		//set global_taskmap_vec
 		taskmap_vec = new TaskMapT*[num_compers];
-		global_tasknum_vec = new atomic<size_t>[num_compers];
+		global_tasknum_vec = new atomic<size_t>[num_compers+1];
+		global_tasknum_vec[num_compers] = 0;
 		global_taskmap_vec = taskmap_vec;
 		for(int i=0; i<num_compers; i++)
 		{

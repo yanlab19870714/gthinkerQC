@@ -57,7 +57,7 @@ public:
 	void progress_sync()
 	{
 		size_t task_num = 0;
-		for(int i=0; i<num_compers; i++)
+		for(int i=0; i<num_compers+1; i++)
 			task_num += global_tasknum_vec[i];
 		//======
 		if (_my_rank != MASTER_RANK)

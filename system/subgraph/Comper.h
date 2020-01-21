@@ -291,7 +291,10 @@ public:
     		task->unlock_all();
     		if(go == false)
     		{
-    			global_tasknum_vec[thread_rank]++;
+    			if(task->is_bigtask())
+    				global_tasknum_vec[num_compers]++;
+    			else
+    				global_tasknum_vec[thread_rank]++;
 				delete task;
     			break;
     		}
@@ -333,11 +336,11 @@ public:
     //it flushes tasks as a file to disk when q_task's size goes beyond 3 * TASK_BATCH_NUM
     void add_task(TaskT * task)
     {
-    	if (task->is_bigtask()){
+    	if(task->is_bigtask()){
     		TaskQueue& btq = q_bigtask();
     		unique_lock<mutex> lck(bigtask_que_lock);
     		//get the ref of global big task queue
-    		if (btq.size() == BIG_TASK_QUEUE_CAPACITY){
+    		if(btq.size() == BIG_TASK_QUEUE_CAPACITY){
     			set_bigTask_fname();
     			ifbinstream bigTask_out(fname);
     			int i = 0;
@@ -400,10 +403,22 @@ public:
         }
 		return true;
     }
+
     //fetch a task from bigtask-map's "bigtask_buf",
     //process it, and add to big_task_queue (flush to disk if necessary)
     bool push_task_from_bigTaskmap(){
-    	return false;
+    	TaskT * task = get_big_maptask().get();
+    	if(task == NULL) return false; //no task to fetch from q_task
+    	task->set_pulled(); //reset task's frontier_vertexes (to replace NULL entries)
+    	bool go = compute(task); //set new "to_pull"
+    	task->unlock_all();
+    	if(go != false) add_task(task); //add task to queue
+        else
+        {
+        	global_tasknum_vec[num_compers]++;
+        	delete task;
+        }
+		return true;
     }
 
     //=========================
