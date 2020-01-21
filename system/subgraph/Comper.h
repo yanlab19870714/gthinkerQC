@@ -138,6 +138,33 @@ public:
     	}
     }
 
+    //load bigtasks from a file (from "global_bigTask_fileList" to the task queue)
+	//returns false if "global_bigTask_fileList" is empty
+	bool file2bigTask_queue()
+	{
+		string file;
+		bool succ = global_bigTask_fileList.dequeue(file);
+		if(!succ) return false; //"global_bigTask_fileList" is empty
+		else
+		{
+			global_file_num --;
+			ofbinstream in(file.c_str());
+			while(!in.eof())
+			{
+				TaskT* task;
+				in >> task;
+				add_task(task);
+			}
+			in.close();
+
+			if (remove(file.c_str()) != 0) {
+				cout<<"Error removing file: "<<file<<endl;
+				perror("Error printed by perror");
+			}
+			return true;
+		}
+	}
+
     //load tasks from local-table
 	//returns false if local-table is exhausted
     bool locTable2queue()
@@ -186,34 +213,63 @@ public:
     {
     	bool task_spawn_called = false;
     	bool push_called = false;
-    	//fill the queue when there is space
-    	if(q_task.size() <= TASK_BATCH_NUM)
+    	bool bigTask_push_called = false;
+    	//fill the big task queue when there is space
+    	TaskQueue& btq = q_bigtask();
+    	if(btq.size() <= BIG_TASK_REFILL_BATCH)
     	{
-    		if(!file2queue()) //priority <1>: fill from file on local disk
-    		{//"global_file_list" is empty
-    			if(!push_task_from_taskmap()) //priority <2>: fetch a task from task-map
-    			{//CASE 1: task-map's "task_buf" is empty
-    				task_spawn_called = locTable2queue();
-    			}
-    			else
-    			{//CASE 2: try to move TASK_BATCH_NUM tasks from task-map to the queue
-    				push_called = true;
-    				while(q_task.size() < 2 * TASK_BATCH_NUM)
-    				{//i starts from 1 since push_task_from_taskmap() has been called once
-    					if(!push_task_from_taskmap()) break; //task-map's "task_buf" is empty, no more try
+    		if(!file2bigTask_queue()) //priority <1>: fill from file on local disk
+    		{//"global_bigTask_fileList" is empty
+    			if(push_task_from_bigTaskmap()) //priority <2>: fetch a task from bigtask-map
+    			{	//CASE 1: bigtask-map's "bigtask_buf" is not empty
+    				// try to move BIG_TASK_FLUSH_BATCH tasks from bigtask-map to the big task queue
+    				bigTask_push_called = true;
+    				while(btq.size() < BIG_TASK_REFILL_BATCH + BIG_TASK_FLUSH_BATCH)
+    				{//i starts from 1 since push_task_from_bigTaskmap() has been called once
+    					if(!push_task_from_bigTaskmap()) break; //bigtask-map's "bigtask_buf" is empty, no more try
     				}
-    			}
+    			}//else CASE 2: check normal task queue
     		}
+
     	}
-    	//==================================
-    	if(q_task.size() == 0){
-			if(task_spawn_called) return true;
-			else if(push_called) return true;
-			else return false;
-		}
-    	//fetch task from Comper's task queue head
-    	TaskT * task = q_task.front();
-    	q_task.pop_front();
+    	TaskT * task;
+    	if(btq.size() != 0)
+    	{
+    		//fetch task from big task queue head
+    		task = btq.front();
+    		btq.pop_front();
+    	}else
+    	{
+    		//fill the queue when there is space
+			if(q_task.size() <= TASK_BATCH_NUM)
+			{
+				if(!file2queue()) //priority <1>: fill from file on local disk
+				{//"global_file_list" is empty
+					if(!push_task_from_taskmap()) //priority <2>: fetch a task from task-map
+					{//CASE 1: task-map's "task_buf" is empty
+						task_spawn_called = locTable2queue();
+					}
+					else
+					{//CASE 2: try to move TASK_BATCH_NUM tasks from task-map to the queue
+						push_called = true;
+						while(q_task.size() < 2 * TASK_BATCH_NUM)
+						{//i starts from 1 since push_task_from_taskmap() has been called once
+							if(!push_task_from_taskmap()) break; //task-map's "task_buf" is empty, no more try
+						}
+					}
+				}
+			}
+			//==================================
+			if(q_task.size() == 0){
+				if(task_spawn_called) return true;
+				else if(push_called) return true;
+				else return false;
+			}
+			//fetch task from Comper's task queue head
+			task = q_task.front();
+			q_task.pop_front();
+    	}
+
     	//task.to_pull should've been set
     	//[*] process "to_pull" to get "frontier_vertexes" and return "how many" vertices to pull
     	//if "how many" = 0, call task.compute(.) to set task.to_pull (and unlock old "to_pull") and go to [*]
@@ -221,8 +277,7 @@ public:
     	//init-ed to be true since:
     	//1. if it is newly spawned, should allow it to run
     	//2. if compute(.) returns false, should be filtered already, won't be popped
-    	TaskMapT& pop_map_task = task->is_bigtask() ? get_big_maptask() : map_task;
-    	while(task->pull_all(counter, pop_map_task)) //may call add2map(.)
+    	while(task->pull_all(counter, task->is_bigtask() ? get_big_maptask() : map_task)) //may call add2map(.)
     	{
     		go = compute(task);
     		task->unlock_all();
@@ -336,6 +391,11 @@ public:
         	delete task;
         }
 		return true;
+    }
+    //fetch a task from bigtask-map's "bigtask_buf",
+    //process it, and add to big_task_queue (flush to disk if necessary)
+    bool push_task_from_bigTaskmap(){
+    	return false;
     }
 
     //=========================
