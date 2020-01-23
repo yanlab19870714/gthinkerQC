@@ -216,7 +216,7 @@ public:
     	bool bigTask_push_called = false;
     	//fill the big task queue when there is space
     	TaskQueue& btq = q_bigtask();
-    	if(btq.size() <= BIG_TASK_REFILL_BATCH)
+    	if(btq.size() <= BIG_TASK_FLUSH_BATCH)
     	{
     		if(!file2bigTask_queue()) //priority <1>: fill from file on local disk
     		{//"global_bigTask_fileList" is empty
@@ -224,7 +224,7 @@ public:
     			{	//CASE 1: bigtask-map's "bigtask_buf" is not empty
     				// try to move BIG_TASK_FLUSH_BATCH tasks from bigtask-map to the big task queue
     				bigTask_push_called = true;
-    				while(btq.size() < BIG_TASK_REFILL_BATCH + BIG_TASK_FLUSH_BATCH)
+    				while(btq.size() < 2 * BIG_TASK_FLUSH_BATCH)
     				{//i starts from 1 since push_task_from_bigTaskmap() has been called once
     					if(!push_task_from_bigTaskmap()) break; //bigtask-map's "bigtask_buf" is empty, no more try
     				}
@@ -232,13 +232,17 @@ public:
     		}
 
     	}
-    	TaskT * task;
-    	if(btq.size() != 0)
+    	TaskT * task = NULL;
     	{
-    		//fetch big task from big task queue head
-    		task = btq.front();
-    		btq.pop_front();
-    	}else
+    		unique_lock<mutex> lck(bigtask_que_lock);
+    		if(btq.size() != 0)
+			{
+				//fetch big task from big task queue head
+				task = btq.front();
+				btq.pop_front();
+			}
+    	}
+    	if(task == NULL)
     	{
     		//fill the queue when there is space
 			if(q_task.size() <= TASK_BATCH_NUM)
@@ -260,22 +264,16 @@ public:
 				}
 			}
 			//==================================
-			if(btq.size() != 0)
+			if(q_task.size() == 0)
 			{
-				//fetch big task from big task queue head
-				task = btq.front();
-				btq.pop_front();
-			}else{
-				if(q_task.size() == 0)
-				{
-					if(task_spawn_called) return true;
-					else if(push_called) return true;
-					else return false;
-				}
-				//fetch task from Comper's task queue head
-				task = q_task.front();
-				q_task.pop_front();
+				if(task_spawn_called) return true;
+				else if(push_called) return true;
+				else if(bigTask_push_called) return true;
+				else return false;
 			}
+			//fetch task from Comper's task queue head
+			task = q_task.front();
+			q_task.pop_front();
     	}
 
     	//task.to_pull should've been set

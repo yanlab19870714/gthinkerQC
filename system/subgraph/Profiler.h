@@ -29,6 +29,7 @@ public:
 	thread main_thread;
 	bool first_sync;
 	vector<size_t> prev;
+	vector<size_t> bigTask_prev;
 
 	bool endTag_sync() //returns true if any worker has endTag = true
 	{
@@ -57,12 +58,13 @@ public:
 	void progress_sync()
 	{
 		size_t task_num = 0;
-		for(int i=0; i<num_compers+1; i++)
+		for(int i=0; i<num_compers; i++)
 			task_num += global_tasknum_vec[i];
 		//======
 		if (_my_rank != MASTER_RANK)
 		{//send partialT to aggregator
 			send_data(task_num, MASTER_RANK, PROGRESS_CHANNEL);
+			send_data(global_tasknum_vec[num_compers], MASTER_RANK, PROGRESS_CHANNEL);
 			//------
 			size_t n_stolen = num_stolen;
 			send_data(n_stolen, MASTER_RANK, PROGRESS_CHANNEL);
@@ -71,27 +73,32 @@ public:
 		else
 		{
 			vector<size_t> task_num_vec(_num_workers); //collecting task# from all workers
+			vector<size_t> bigtask_num_vec(_num_workers); //collecting bigtask# from all workers
 			vector<size_t> stolen_vec(_num_workers); //collecting stolen-task# from all workers
 			size_t total = 0;
+			size_t bigTask_total = 0;
 			for(int i = 0; i < _num_workers; i++)
 			{
 				if(i != MASTER_RANK)
 				{
 					task_num_vec[i] = recv_data<size_t>(i, PROGRESS_CHANNEL);
+					bigtask_num_vec[i] = recv_data<size_t>(i, PROGRESS_CHANNEL);
 					stolen_vec[i] = recv_data<size_t>(i, PROGRESS_CHANNEL);
 				}
 				else
 				{
 					task_num_vec[i] = task_num;
+					bigtask_num_vec[i] = global_tasknum_vec[num_compers];
 					stolen_vec[i] = num_stolen;
 					num_stolen = 0; //clear
 				}
 				total += task_num_vec[i];
+				bigTask_total += bigtask_num_vec[i];
 			}
 			//======
 			cout<<endl;
 			cout<<"============ PROGRESS REPORT ============"<<endl;
-			cout<<"Total number of tasks processed: "<<total<<endl;
+			cout<<"Total number of normal tasks processed: "<<total<<endl;
 			for(int i=0; i<_num_workers; i++)
 			{
 				if(first_sync)
@@ -108,6 +115,22 @@ public:
 				if(stolen_vec[i] > 0) cout<<"--- "<<stolen_vec[i]<<" more tasks stolen"<<endl;
 			}
 			cout<<endl;
+
+			cout<<"Total number of big tasks processed: "<<bigTask_total<<endl;
+			for(int i=0; i<_num_workers; i++)
+			{
+				if(first_sync)
+				{
+					cout<<"Worker "<<i<<": "<<bigtask_num_vec[i]<<" big tasks processed"<<endl;
+				}
+				else
+				{
+					size_t delta = bigtask_num_vec[i] - bigTask_prev[i];
+					cout<<"Worker "<<i<<": "<<bigtask_num_vec[i]<<" big tasks processed (+ "<<delta<<")"<<endl;
+				}
+				bigTask_prev[i] = bigtask_num_vec[i];
+
+			}
 		}
 		first_sync = false;
 	}
@@ -133,6 +156,7 @@ public:
     {
     	main_thread = thread(&Profiler::run, this);
     	prev.resize(_num_workers);
+    	bigTask_prev.resize(_num_workers);
     	first_sync = true;
     }
 

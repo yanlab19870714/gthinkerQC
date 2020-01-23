@@ -166,7 +166,6 @@ struct WorkerParams {
 #define BIG_TASK_FLUSH_BATCH 10
 #define BIG_TASK_QUEUE_CAPACITY 50
 #define BIG_TASKMAP_CAPACITY 50
-#define BIG_TASK_REFILL_BATCH 30
 conque<string> global_bigTask_fileList;
 
 void* big_task_queue;
