@@ -79,7 +79,7 @@ public:
 
 	//check whether task is bigtask
 	virtual bool is_bigtask(){
-		return false;
+		return true;
 	}
 
 	//to be used by users in UDF compute(.)
@@ -90,8 +90,9 @@ public:
 	//after task.compute(.) returns, process "to_pull" to:
 	//set "frontier_vertexes"
 	bool pull_all(thread_counter & counter, TaskMapT & taskmap) //returns whether "no need to wait for remote-pulling"
-	{//called by Comper, giving its thread_counter and thread_id
-		long long task_id = taskmap.peek_next_taskID();
+	{
+		//called by Comper, giving its thread_counter and thread_id
+		long long task_id = taskmap.get_next_taskID();
 		CTable & vcache = *(CTable *)global_vcache;
 		VTable & ltable = *(VTable *)global_local_table;
 		met_counter = 0;

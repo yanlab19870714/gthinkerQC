@@ -113,6 +113,7 @@ public:
     	big_task_queue = new TaskQueue;
     	big_map_task = new TaskMapT;
     	get_big_maptask().thread_rank = num_compers;
+    	get_big_maptask().need_lock = true;
 
     	global_end_label = false;
     	local_idle = false;
@@ -231,6 +232,7 @@ public:
 		global_taskmap_vec = taskmap_vec;
 		for(int i=0; i<num_compers; i++)
 		{
+			compers[i].map_task.need_lock = false;
 			taskmap_vec[i] = &(compers[i].map_task);
 			global_tasknum_vec[i] = 0;
 			compers[i].start(i);
@@ -614,7 +616,8 @@ public:
 		while(global_end_label == false)
 		{
 			clock_t last_tick = clock();
-			bool sth2steal = steal_planning();
+			//bool sth2steal = steal_planning();
+			bool sth2steal = false;
             status_sync(sth2steal);
             //------
             //reset idle status of Worker, compers will add back if idle

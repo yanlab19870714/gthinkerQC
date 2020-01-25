@@ -23,6 +23,8 @@
 #include <iostream>
 #include "util/conmap2t.h"
 
+#define SEQNO_LIMIT 9223372036854775807
+
 using namespace std;
 
 template <class TaskT>
@@ -38,6 +40,8 @@ public:
 	//- removed by RespServer
 
 	unsigned int seqno; //sequence number for tasks, go back to 0 when used up
+	mutex mtx;
+	bool need_lock;
 
 	int thread_rank; //associated with which thread?
 
@@ -46,19 +50,15 @@ public:
 	//> ++ by add2map(.)
 	//> -- by get(.)
 
-	long long peek_next_taskID() //not take it
+	long long get_next_taskID() ////take it
 	{
 		long long id = thread_rank;
 		id = (id << 48); //first 16-bit is thread_id
-		return (id + seqno);
-	}
-
-	long long get_next_taskID() //take it
-	{
-		long long id = thread_rank;
-		id = (id << 48); //first 16-bit is thread_id
+		if(need_lock) mtx.lock();
 		id += seqno;
 		seqno++;
+		assert(seqno < SEQNO_LIMIT);
+		if(need_lock) mtx.unlock();
 		return id;
 	}
 
@@ -77,14 +77,14 @@ public:
 
 	//called by Comper, need to provide counter = task.pull_all(.)
 	//only called if counter > 0
-	void add2map(TaskT * task)
+	void add2map(TaskT * task, long long tid)
 	{
 		size++;
 		//add to task_map
-		long long tid = get_next_taskID();
 		conmap2t_bucket<long long, TaskT *> & bucket = task_map.get_bucket(tid);
 		bucket.lock();
 		bucket.insert(tid, task);
+		//cout<<"++++++++"<<tid<<"+++++++++"<<endl;
 		bucket.unlock();
 	}//no need to add "v -> tasks" track, should've been handled by lock&get(tid) -> request(tid)
 
@@ -92,21 +92,22 @@ public:
 	//- counter--
 	//- if task is ready, move it from "task_map" to "task_buf"
 	void update(long long task_id)
-	{
-		conmap2t_bucket<long long, TaskT *> & bucket = task_map.get_bucket(task_id);
-		bucket.lock();
-		hash_map<long long, TaskT *> & kvmap = bucket.get_map();
-		auto it = kvmap.find(task_id);
-		assert(it != kvmap.end()); //#DEBUG# to make sure key is found
-		TaskT * task = it->second;
-		task->met_counter++;
-		if(task->met_counter == task->req_size())
 		{
-			task_buf.enqueue(task);
-			kvmap.erase(it);
+			conmap2t_bucket<long long, TaskT *> & bucket = task_map.get_bucket(task_id);
+			bucket.lock();
+			hash_map<long long, TaskT *> & kvmap = bucket.get_map();
+			auto it = kvmap.find(task_id);
+			assert(it != kvmap.end()); //#DEBUG# to make sure key is found
+			TaskT * task = it->second;
+			task->met_counter++;
+			if(task->met_counter == task->req_size())
+			{
+				task_buf.enqueue(task);
+				//cout<<"----------"<<task_id<<"------------"<<endl;
+				kvmap.erase(it);
+			}
+			bucket.unlock();
 		}
-		bucket.unlock();
-	}
 
 	TaskT* get() //get the next ready-task in "task_buf", returns NULL if no more
 	{

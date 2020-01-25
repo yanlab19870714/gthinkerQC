@@ -126,7 +126,7 @@ public:
     		{
     			TaskT* task;
     			in >> task;
-    			add_task(task);
+    			add_smallTask(task);
     		}
     		in.close();
 
@@ -147,13 +147,12 @@ public:
 		if(!succ) return false; //"global_bigTask_fileList" is empty
 		else
 		{
-			global_file_num --;
 			ofbinstream in(file.c_str());
 			while(!in.eof())
 			{
 				TaskT* task;
 				in >> task;
-				add_task(task);
+				add_bigTask_nolock(task);
 			}
 			in.close();
 
@@ -216,32 +215,22 @@ public:
     	bool bigTask_push_called = false;
     	//fill the big task queue when there is space
     	TaskQueue& btq = q_bigtask();
-    	if(btq.size() <= BIG_TASK_FLUSH_BATCH)
-    	{
-    		if(!file2bigTask_queue()) //priority <1>: fill from file on local disk
-    		{//"global_bigTask_fileList" is empty
-    			if(push_task_from_bigTaskmap()) //priority <2>: fetch a task from bigtask-map
-    			{	//CASE 1: bigtask-map's "bigtask_buf" is not empty
-    				// try to move BIG_TASK_FLUSH_BATCH tasks from bigtask-map to the big task queue
-    				bigTask_push_called = true;
-    				while(btq.size() < 2 * BIG_TASK_FLUSH_BATCH)
-    				{//i starts from 1 since push_task_from_bigTaskmap() has been called once
-    					if(!push_task_from_bigTaskmap()) break; //bigtask-map's "bigtask_buf" is empty, no more try
-    				}
-    			}//else CASE 2: check normal task queue
-    		}
 
-    	}
     	TaskT * task = NULL;
+    	if(bigtask_que_lock.try_lock())
     	{
-    		unique_lock<mutex> lck(bigtask_que_lock);
-    		if(btq.size() != 0)
+			if(btq.size() <= BIG_TASK_FLUSH_BATCH)
+				file2bigTask_queue();
+
+			if(btq.size() != 0)
 			{
 				//fetch big task from big task queue head
 				task = btq.front();
 				btq.pop_front();
 			}
+			bigtask_que_lock.unlock();
     	}
+
     	if(task == NULL)
     	{
     		//fill the queue when there is space
@@ -335,54 +324,62 @@ public:
     void add_task(TaskT * task)
     {
     	if(task->is_bigtask()){
-    		TaskQueue& btq = q_bigtask();
     		unique_lock<mutex> lck(bigtask_que_lock);
-    		//get the ref of global big task queue
-    		if(btq.size() == BIG_TASK_QUEUE_CAPACITY){
-    			set_bigTask_fname();
-    			ifbinstream bigTask_out(fname);
-    			int i = 0;
-    			while(i < BIG_TASK_FLUSH_BATCH)
-				{
-					//get task at the tail
-					TaskT * t = btq.back();
-					btq.pop_back();
-					//stream to file
-					bigTask_out << t;
-					//release from memory
-					delete t;
-					i++;
-				}
-    			bigTask_out.close();
-    			global_bigTask_fileList.enqueue(fname);
-    		}
-    		btq.push_back(task);
-    	}else{
-    		if(q_task.size() == 3 * TASK_BATCH_NUM){
-				set_fname();
-				ifbinstream out(fname);
-				//------
-				while(q_task.size() > 2 * TASK_BATCH_NUM)
-				{
-					//get task at the tail
-					TaskT * t = q_task.back();
-					q_task.pop_back();
-					//stream to file
-					out << t;
-					//release from memory
-					delete t;
-				}
-				out.close();
-				//------
-				//register with "global_file_list"
-				global_file_list.enqueue(fname);
-				global_file_num ++;
+    		add_bigTask_nolock(task);
+    	} else add_smallTask(task);
+    }
+
+    void add_smallTask(TaskT * task)
+    {
+		if(q_task.size() == 3 * TASK_BATCH_NUM){
+			set_fname();
+			ifbinstream out(fname);
+			//------
+			while(q_task.size() > 2 * TASK_BATCH_NUM)
+			{
+				//get task at the tail
+				TaskT * t = q_task.back();
+				q_task.pop_back();
+				//stream to file
+				out << t;
+				//release from memory
+				delete t;
 			}
-			//--- deprecated:
-			//task->comper = this;//important !!! set task.comper before entering processing
-			//---------------
-			q_task.push_back(task);
-    	}
+			out.close();
+			//------
+			//register with "global_file_list"
+			global_file_list.enqueue(fname);
+			global_file_num ++;
+		}
+		//--- deprecated:
+		//task->comper = this;//important !!! set task.comper before entering processing
+		//---------------
+		q_task.push_back(task);
+    }
+
+    void add_bigTask_nolock(TaskT * task)
+    {
+		TaskQueue& btq = q_bigtask();
+		//get the ref of global big task queue
+		if(btq.size() == BIG_TASK_QUEUE_CAPACITY){
+			set_bigTask_fname();
+			ifbinstream bigTask_out(fname);
+			int i = 0;
+			while(i < BIG_TASK_FLUSH_BATCH)
+			{
+				//get task at the tail
+				TaskT * t = btq.back();
+				btq.pop_back();
+				//stream to file
+				bigTask_out << t;
+				//release from memory
+				delete t;
+				i++;
+			}
+			bigTask_out.close();
+			global_bigTask_fileList.enqueue(fname);
+		}
+		btq.push_back(task);
     }
 
     //part 1's logic: fetch a task from task-map's "task_buf", process it, and add to q_task (flush to disk if necessary)
@@ -393,7 +390,7 @@ public:
     	task->set_pulled(); //reset task's frontier_vertexes (to replace NULL entries)
     	bool go = compute(task); //set new "to_pull"
     	task->unlock_all();
-    	if(go != false) add_task(task); //add task to queue
+    	if(go != false) add_smallTask(task); //add task to queue
         else
         {
         	global_tasknum_vec[thread_rank]++;
@@ -404,13 +401,18 @@ public:
 
     //fetch a task from bigtask-map's "bigtask_buf",
     //process it, and add to big_task_queue (flush to disk if necessary)
-    bool push_task_from_bigTaskmap(){
+    bool push_task_from_bigTaskmap()
+    {
     	TaskT * task = get_big_maptask().get();
     	if(task == NULL) return false; //no task to fetch from q_task
     	task->set_pulled(); //reset task's frontier_vertexes (to replace NULL entries)
     	bool go = compute(task); //set new "to_pull"
     	task->unlock_all();
-    	if(go != false) add_task(task); //add task to queue
+    	if(go != false)
+    	{//add task to queue
+    		unique_lock<mutex> lck(bigtask_que_lock);
+    		add_bigTask_nolock(task);
+    	}
         else
         {
         	global_tasknum_vec[num_compers]++;
@@ -436,7 +438,8 @@ public:
 				//check whether we can continue to pop a task (may add things to vcache)
 				if(global_cache_size < VCACHE_LIMIT + VCACHE_OVERSIZE_LIMIT) //(1 + alpha) * vcache_limit
 				{
-					if(map_task.size < TASKMAP_LIMIT)
+					if(map_task.size < TASKMAP_LIMIT
+							&& get_big_maptask().size < BIG_TASKMAP_LIMIT)
 					{
 						if(!pop_task()) nothing_processed_by_pop = true; //only the last iteration is useful, others will be set back to false
 					}
@@ -449,7 +452,9 @@ public:
 			{
 				nothing_to_push = false;
 				//unconditionally:
-				if(!push_task_from_taskmap()) nothing_to_push = true; //only the last iteration is useful, others will be set back to false
+				if(!push_task_from_bigTaskmap())
+					if(!push_task_from_taskmap())
+						nothing_to_push = true; //only the last iteration is useful, others will be set back to false
 			}
 			//------
 			if(nothing_to_push)
@@ -457,13 +462,16 @@ public:
 				if(blocked) usleep(WAIT_TIME_WHEN_IDLE); //avoid busy-wait when idle
 				else if(nothing_processed_by_pop)
 				{
-					if(map_task.size == 0) //needed because "push_task_from_taskmap()" does not check whether map_task's map is empty
+					if(get_big_maptask().size == 0)
 					{
-						unique_lock<mutex> lck(mtx_go);
-						idle_set[thread_rank] = true;
-						global_num_idle++;
-						while(idle_set[thread_rank]){
-							cv_go.wait(lck);
+						if(map_task.size == 0) //needed because "push_task_from_taskmap()" does not check whether map_task's map is empty
+						{
+							unique_lock<mutex> lck(mtx_go);
+							idle_set[thread_rank] = true;
+							global_num_idle++;
+							while(idle_set[thread_rank]){
+								cv_go.wait(lck);
+							}
 						}
 					}
 					//usleep(WAIT_TIME_WHEN_IDLE); //avoid busy-wait when idle

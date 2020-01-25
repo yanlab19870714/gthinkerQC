@@ -185,7 +185,7 @@ public:
     	auto it = kvmap.find(key);
     	if(it == kvmap.end())
 		{
-			taskmap.add2map(task);
+			taskmap.add2map(task, task_id);
 			bool new_req = pcache.request(key, counter, task_id);
 			if(new_req) q_req.add(key);
 			ret = NULL;
