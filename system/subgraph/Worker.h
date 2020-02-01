@@ -74,6 +74,9 @@ public:
     CTable * cache_table; //cached remote vertices, it creates ReqQueue for appeding reqs
 
 	VertexVec vertexes;
+	typedef stack<VertexT*> VertexStack;
+	VertexStack vertex_stack;
+
     TaskMapT** taskmap_vec;
 
     bool local_idle; //indicate whether the current worker is idle
@@ -124,7 +127,7 @@ public:
     	for(int i=0; i<_num_workers; i++) req_counter[i] = 0; //must be before the next line
     	global_vcache = cache_table = new CTable;
     	global_local_table = &local_table;
-		global_vertexes = &vertexes;
+    	global_vertexes_stack = &vertex_stack;
 		idle_set = new atomic<bool>[comper_num];
 		for(int i=0; i<comper_num; i++) idle_set[i] = false;
     }
@@ -269,9 +272,9 @@ public:
 	size_t get_remaining_task_num()
 	//not counting number of active tasks in memory (for simplicity)
 	{
-		global_vertex_pos_lock.lock();
-		int table_remain = local_table.size() - global_vertex_pos;
-		global_vertex_pos_lock.unlock();
+		global_vertex_stack_lock.lock();
+		int table_remain = vertex_stack.size();
+		global_vertex_stack_lock.unlock();
 		return table_remain + global_file_num * TASK_BATCH_NUM;
 	}
 
@@ -341,7 +344,7 @@ public:
 
 	//get tasks from local-table
 	//returns false if local-table is exhausted
-	bool locTable2vec(vector<TaskT> & tvec)
+	/*bool locTable2vec(vector<TaskT> & tvec)
 	{
 		size_t begin, end; //[begin, end) are the assigned vertices (their positions in local-table)
 		//note that "end" is exclusive
@@ -371,6 +374,10 @@ public:
 			}
 		}
 		return true;
+	}*/
+	//temporary for bigtask revision
+	bool locTable2vec(vector<TaskT> & tvec){
+		return false;
 	}
 
 	//get tasks from disk files
@@ -580,9 +587,6 @@ public:
 		//send vertices according to hash_id (reduce)
 		sync_graph(vertexes);
 
-		//init global_vertex_pos
-		global_vertex_pos = 0;
-
 		//use "vertexes" to set local_table
 		set_local_table(vertexes);
 
@@ -590,6 +594,14 @@ public:
 		worker_barrier();
 		StopTimer(WORKER_TIMER);
 		PrintTimer("Load Time", WORKER_TIMER);
+
+		//copy vertex* in vertexes to vertex_stack (tail to head)
+		int verVec_len = vertexes.size();
+		for(int i=verVec_len-1; i>=0; i--){
+			vertex_stack.push(vertexes[i]);
+		}
+
+		vertexes.clear();
 
 		//ReqQueue already set, by Worker::cache_table
 		//>> by this time, ReqQueue occupies about 0.3% CPU

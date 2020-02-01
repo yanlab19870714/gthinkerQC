@@ -83,12 +83,12 @@ class CliqueComper:public Comper<CliqueTask, CliqueAgg>
 {
 public:
 
-	virtual void task_spawn(VertexT * v)
+	virtual bool task_spawn(VertexT * v)
 	{
 		CliqueAgg* agg = get_aggregator();
 		VSet Qmax;
 		agg->finishPartial(Qmax);//cannot directly use agg->Qmax without rdlock it first
-		if(Qmax.size() >= 1 + v->value.size()) return; //==========> pruning with Qmax right at spawning
+		if(Qmax.size() >= 1 + v->value.size()) return false; //==========> pruning with Qmax right at spawning
 		//cout<<v->id<<": in task_spawn"<<endl;//@@@@@@@@@@@@@
 		CliqueTask * t = new CliqueTask;
 		t->context.push_back(v->id); //====> this is Q = {v}
@@ -97,7 +97,9 @@ public:
 			VertexID nb = v->value[i];
 			t->pull(nb);
 		}
+		bool result = t->is_bigtask();
 		add_task(t);
+		return result;
 	}
 
     virtual bool compute(SubgraphT & g, ContextT & context, vector<VertexT *> & frontier)

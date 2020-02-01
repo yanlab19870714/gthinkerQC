@@ -54,6 +54,7 @@ public:
     typedef TaskMap<TaskT> TaskMapT;
     typedef hash_map<KeyT, VertexT*> VTable;
     typedef typename VTable::iterator TableIter;
+    typedef stack<VertexT*> VertexStack;
 
     TaskQueue q_task; //written only by the thread itself, no need to be conque
     int thread_rank;
@@ -71,7 +72,8 @@ public:
         }
 
     //UDF1
-    virtual void task_spawn(VertexT * v) = 0; //call add_task() inside, will flush tasks to disk if queue overflows
+    virtual bool task_spawn(VertexT * v) = 0; //call add_task() inside, will flush tasks to disk if queue overflows
+
     //UDF2
     virtual bool compute(SubgraphT & g, ContextT & context, vector<VertexT *> & frontier) = 0;
 
@@ -168,33 +170,51 @@ public:
 	//returns false if local-table is exhausted
     bool locTable2queue()
 	{
-		size_t begin, end; //[begin, end) are the assigned vertices (their positions in local-table)
-		//note that "end" is exclusive
 		VTable & ltable = *(VTable *)global_local_table;
 		int size = ltable.size();
 		//======== critical section on "global_vertex_pos"
-		global_vertex_pos_lock.lock();
-		if(global_vertex_pos < size)
+		VertexStack & gb_vertexes = *(VertexStack*) global_vertexes_stack;
+		VertexVec temp_verVec;
+		bool is_empty = false;
+		global_vertex_stack_lock.lock();
+		if(!gb_vertexes.empty())
 		{
-			begin = global_vertex_pos; //starting element
-			end = begin + TASK_BATCH_NUM;
-			if(end > size) end = size;
-			global_vertex_pos = end; //next position to spawn
+			int stack_size = gb_vertexes.size();
+			int verVec_size = min(MINI_BATCH_NUM, stack_size);
+			for(int i=0; i<verVec_size; i++)
+			{
+				temp_verVec.push_back(gb_vertexes.top());
+				gb_vertexes.pop();
+			}
 		}
-		else begin = -1; //meaning that local-table is exhausted
-		global_vertex_pos_lock.unlock();
+		else is_empty = true; //meaning that local-table is exhausted
+		global_vertex_stack_lock.unlock();
 		//======== spawn tasks from local-table[begin, end)
-		if(begin == -1) return false;
+		if(is_empty) return false;
 		else
 		{
-            VertexVec & gb_vertexes = *(VertexVec*) global_vertexes;
-			for(int i=begin; i<end; i++)
+			int len_temp_vv = temp_verVec.size();
+			int i=0;
+			for(; i<len_temp_vv; i++)
 			{//call UDF to spawn tasks
-				task_spawn(gb_vertexes[i]);
+				if(task_spawn(temp_verVec[i])){
+					i++;
+					break;
+				}
+			}
+			if(i<len_temp_vv)
+			{
+				global_vertex_stack_lock.lock();
+				for(;i<len_temp_vv;i++)
+				{
+					gb_vertexes.push(temp_verVec[i]);
+				}
+				global_vertex_stack_lock.unlock();
 			}
 			return true;
 		}
 	}
+
 
     AggregatorT* get_aggregator() //get aggregator
     //cannot use the same name as in global.h (will be understood as the local one, recursive definition)
@@ -321,7 +341,7 @@ public:
 
     //tasks are added to q_task only through this function !!!
     //it flushes tasks as a file to disk when q_task's size goes beyond 3 * TASK_BATCH_NUM
-    void add_task(TaskT * task)
+    void add_task(TaskT * task) //!!! do not use "task" after this call !!! (may already be serialized to disk)
     {
     	if(task->is_bigtask()){
     		unique_lock<mutex> lck(bigtask_que_lock);

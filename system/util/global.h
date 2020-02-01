@@ -39,6 +39,7 @@
 
 //============================
 #include <time.h>
+#include <stack>
 
 int POLLING_TIME; //unit: usec, user-configurable, used by sender
 //set in init_worker()
@@ -89,9 +90,8 @@ atomic<int> global_num_idle(0);
 conque<string> global_file_list; //tasks buffered on local disk; each element is a file name
 atomic<int> global_file_num; //number of files in global_file_list
 
-void* global_vertexes;
-int global_vertex_pos; //next vertex position in global_vertexes to spawn a task
-mutex global_vertex_pos_lock; //lock for global_vertex_pos
+void* global_vertexes_stack;
+mutex global_vertex_stack_lock; //lock for global_vertex_stack
 
 #define TASK_GET_NUM 1
 #define TASK_RECV_NUM 1
