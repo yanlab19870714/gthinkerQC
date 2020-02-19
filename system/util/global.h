@@ -40,6 +40,7 @@
 //============================
 #include <time.h>
 #include <stack>
+#include <fstream>
 
 int POLLING_TIME; //unit: usec, user-configurable, used by sender
 //set in init_worker()
@@ -67,8 +68,7 @@ static clock_t polling_ticks; // = POLLING_TIME * CLOCKS_PER_SEC / 1000000;
 #define VCACHE_OVERSIZE_FACTOR 0.2
 #define VCACHE_OVERSIZE_LIMIT VCACHE_LIMIT * VCACHE_OVERSIZE_FACTOR
 
-#define MAX_STEAL_TASK_NUM 10*TASK_BATCH_NUM //how many tasks to steal at a time at most
-#define MIN_TASK_NUM_BEFORE_STEALING 10*TASK_BATCH_NUM //how many tasks should be remaining (or task stealing is triggered)
+#define MAX_STEAL_TASK_NUM BIG_TASK_FLUSH_BATCH //how many tasks to steal at a time at most
 
 #define MINI_BATCH_NUM 10 //used by spawning from local
 #define REQUEST_BOUND 50000 //the maximal number of requests could be sent between each two workers //tuned on GigE
@@ -167,11 +167,13 @@ struct WorkerParams {
 #define BIG_TASK_QUEUE_CAPACITY 50
 #define BIG_TASKMAP_LIMIT  8 * BIG_TASK_FLUSH_BATCH
 conque<string> global_bigTask_fileList;
+atomic<int> global_bigTask_file_num; //number of files in global_bigTask_fileList
 
 void* big_task_queue;
 mutex bigtask_que_lock;
 
 void* big_map_task;
+size_t ave_num;
 //============================
 //general types
 typedef int VertexID;

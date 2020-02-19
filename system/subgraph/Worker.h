@@ -32,6 +32,7 @@
 #include "Profiler.h"
 #include <unistd.h> //sleep(sec)
 #include <queue> //for std::priority_queue
+#include <numeric> //for std::accumulate
 
 using namespace std;
 
@@ -272,17 +273,11 @@ public:
 	size_t get_remaining_task_num()
 	//not counting number of active tasks in memory (for simplicity)
 	{
-		global_vertex_stack_lock.lock();
-		int table_remain = vertex_stack.size();
-		global_vertex_stack_lock.unlock();
-		return table_remain + global_file_num * TASK_BATCH_NUM;
+		bigtask_que_lock.lock();
+		int q_bigtask_size = q_bigtask().size();
+		bigtask_que_lock.unlock();
+		return q_bigtask_size + global_bigTask_file_num * BIG_TASK_FLUSH_BATCH;
 	}
-
-	struct steal_plan
-	{
-		int src_rank;
-		int dst_rank;
-	};
 
 	struct max_heap_entry
 	{
@@ -380,16 +375,16 @@ public:
 		return false;
 	}
 
-	//get tasks from disk files
-	//returns false if "global_file_list" is empty
-	bool file2vec(vector<TaskT> & tvec)
+	//get big tasks from disk files
+	//returns false if "global_bigTask_fileList" is empty
+	bool bigTask_file2vec(vector<TaskT> & tvec)
 	{
 		string file;
-		bool succ = global_file_list.dequeue(file);
+		bool succ = global_bigTask_fileList.dequeue(file);
 		if(!succ) return false; //"global_file_list" is empty
 		else
 		{
-			global_file_num --;
+			global_bigTask_file_num --;
 			ofbinstream in(file.c_str());
 			TaskT dummy;
 			while(!in.eof())
@@ -423,14 +418,59 @@ public:
 		fileSeqNo++;
 	}
 
+	//set name for big task file
+	long long bigFileSeqNo = 1;
+	void set_bigTask_fname()
+	{
+		strcpy(fname, TASK_DISK_BUFFER_DIR.c_str());
+		sprintf(num, "/bt_%d_", _my_rank);
+		strcat(fname, num);
+		sprintf(num, "%d_", num_compers);
+		strcat(fname, num);
+		sprintf(num, "%lld", bigFileSeqNo);
+		strcat(fname, num);
+		bigFileSeqNo++;
+	}
+
+	void add_bigTask(TaskT * task)
+	{
+		unique_lock<mutex> lck(bigtask_que_lock);
+		TaskQueue& btq = q_bigtask();
+		//get the ref of global big task queue
+		if(btq.size() == BIG_TASK_QUEUE_CAPACITY){
+			//@@@@@
+			set_bigTask_fname();
+			ifbinstream bigTask_out(fname);
+			int i = 0;
+			while(i < BIG_TASK_FLUSH_BATCH)
+			{
+				//get task at the tail
+				TaskT * t = btq.back();
+				btq.pop_back();
+				//stream to file
+				bigTask_out << t;
+				//release from memory
+				delete t;
+				i++;
+			}
+			bigTask_out.close();
+			global_bigTask_fileList.enqueue(fname);
+			global_bigTask_file_num ++;
+		}
+		btq.push_back(task);
+	}
+
+
 	bool steal_planning() //whether there's something to steal from/to others
 	{
-		vector<int> my_steal_list;
+		vector<int> my_single_steal_list;
+		vector<int> my_batch_steal_list;
 		//====== set my_steal_list
 		if(_my_rank != MASTER_RANK)
 		{
 			send_data(get_remaining_task_num(), MASTER_RANK, STATUS_CHANNEL);
-			recv_data<vector<int> >(MASTER_RANK, STATUS_CHANNEL, my_steal_list);
+			recv_data<vector<int> >(MASTER_RANK, STATUS_CHANNEL, my_single_steal_list);
+			recv_data<vector<int> >(MASTER_RANK, STATUS_CHANNEL, my_batch_steal_list);
 		}
 		else
 		{
@@ -438,22 +478,25 @@ public:
 			vector<size_t> remain_vec(_num_workers);
 			for(int i=0; i<_num_workers; i++)
 			{
-				if(i != MASTER_RANK) remain_vec[i] = recv_data<size_t>(i, STATUS_CHANNEL);
-				else remain_vec[i] = get_remaining_task_num();
+				if(i != MASTER_RANK)
+					remain_vec[i] = recv_data<size_t>(i, STATUS_CHANNEL);
+				else
+					remain_vec[i] = get_remaining_task_num();
 			}
 			//------
 			priority_queue<max_heap_entry> max_heap;
 			priority_queue<min_heap_entry> min_heap;
+			ave_num = accumulate(remain_vec.begin(), remain_vec.end(), 0)/remain_vec.size();
 			for(int i=0; i<_num_workers; i++)
 			{
-				if(remain_vec[i] > MIN_TASK_NUM_BEFORE_STEALING)
+				if(remain_vec[i] > ave_num)
 				{
 					max_heap_entry en;
 					en.num_remain = remain_vec[i];
 					en.rank = i;
 					max_heap.push(en);
 				}
-				else if(remain_vec[i] < MIN_TASK_NUM_BEFORE_STEALING)
+				else if(remain_vec[i] < ave_num)
 				{
 					min_heap_entry en;
 					en.num_remain = remain_vec[i];
@@ -464,89 +507,151 @@ public:
 			//------
 			//plan generation
 			vector<int> steal_num(_num_workers, 0); //each element should not exceed MAX_STEAL_TASK_NUM
-			vector<steal_plan> plans;
+			vector<vector<int> > single_steal_lists(_num_workers); //steal_list[i] = stealing tasks
+			vector<vector<int> > batch_steal_lists(_num_workers);
+			int total_plans_num = 0;
 			while(!max_heap.empty() && !min_heap.empty())
 			{
 				max_heap_entry max = max_heap.top();
 				max_heap.pop();
 				min_heap_entry min = min_heap.top();
 				min_heap.pop();
-				if(max.num_remain - TASK_BATCH_NUM < min.num_remain) break;
-				else
+				if(ave_num - min.num_remain > BIG_TASK_FLUSH_BATCH
+						&& max.num_remain - ave_num > BIG_TASK_FLUSH_BATCH)
 				{
-					max.num_remain -= TASK_BATCH_NUM;
-					min.num_remain += TASK_BATCH_NUM;
-					steal_num[min.rank] += TASK_BATCH_NUM;
+					max.num_remain -= BIG_TASK_FLUSH_BATCH;
+					min.num_remain += BIG_TASK_FLUSH_BATCH;
+					steal_num[min.rank] += BIG_TASK_FLUSH_BATCH;
+					total_plans_num += BIG_TASK_FLUSH_BATCH;
+
+					//a negative tag (-x-1) means receiving
+					batch_steal_lists[min.rank].push_back(-max.rank-1);
+					batch_steal_lists[max.rank].push_back(min.rank);
 					//---
-					steal_plan plan;
-					plan.src_rank = max.rank;
-					plan.dst_rank = min.rank;
-					plans.push_back(plan);
+					if(max.num_remain > ave_num) max_heap.push(max);
+					if(steal_num[min.rank] < MAX_STEAL_TASK_NUM &&
+							min.num_remain < ave_num)
+						min_heap.push(min);
+				}
+				else
+				{//steal n task; n < BIG_TASK_FLUSH_BATCH
+					int steal_batch = std::min((max.num_remain - ave_num), (ave_num - min.num_remain));
+					max.num_remain -= steal_batch;
+					min.num_remain += steal_batch;
+					steal_num[min.rank] += steal_batch;
+					total_plans_num += steal_batch;
+
+					for(int i=0; i<steal_batch; i++){
+						single_steal_lists[min.rank].push_back(-max.rank-1);
+						single_steal_lists[max.rank].push_back(min.rank);
+					}
 					//---
-					if(max.num_remain > MIN_TASK_NUM_BEFORE_STEALING) max_heap.push(max);
-					if(steal_num[min.rank] + TASK_BATCH_NUM <= MAX_STEAL_TASK_NUM &&
-							min.num_remain < MIN_TASK_NUM_BEFORE_STEALING)
+					if(max.num_remain > ave_num) max_heap.push(max);
+					if(steal_num[min.rank] < MAX_STEAL_TASK_NUM &&
+							min.num_remain < ave_num)
 						min_heap.push(min);
 				}
 			}
 			//------
-			if(plans.size() > 0) cout<<plans.size()<<" stealing plans generated at the master"<<endl;//@@@@@@
-			//calculating stealing tasks
-			//a negative tag (-x-1) means receiving
-			vector<vector<int> > steal_lists(_num_workers); //steal_list[i] = stealing tasks
-			for(int i=0; i<plans.size(); i++)
-			{
-				steal_plan & plan = plans[i];
-				steal_lists[plan.dst_rank].push_back(-plan.src_rank-1);
-				steal_lists[plan.src_rank].push_back(plan.dst_rank);
-			}
+			if(total_plans_num > 0) cout<<total_plans_num<<" stealing plans generated at the master"<<endl;//@@@@@@
 			//------
 			//distribute the plans to machines
 			for(int i=0; i<_num_workers; i++)
 			{
-				if(i == _my_rank) steal_lists[i].swap(my_steal_list);
+				if(i == _my_rank)
+				{
+					single_steal_lists[i].swap(my_single_steal_list);
+					batch_steal_lists[i].swap(my_batch_steal_list);
+				}
 				else
 				{
-					send_data(steal_lists[i], i, STATUS_CHANNEL);
+					send_data(single_steal_lists[i], i, STATUS_CHANNEL);
+					send_data(batch_steal_lists[i], i, STATUS_CHANNEL);
 				}
 			}
 		}
 		//====== execute my_steal_list
-		if(my_steal_list.size() == 0) return false;
-		for(int i=0; i<my_steal_list.size(); i++)
+		if(my_single_steal_list.size() == 0 && my_batch_steal_list.size() == 0) return false;
+
+		if(my_batch_steal_list.size() != 0)
 		{
-			int other = my_steal_list[i];
-			if(other < 0)
+			for(int i=0; i<my_batch_steal_list.size(); i++)
 			{
-				vector<TaskT> tvec;
-				recv_data<vector<TaskT> >(-other-1, STATUS_CHANNEL, tvec);
-				if(tvec.size() > 0)
+				int other = my_batch_steal_list[i];
+				if(other < 0)
 				{
-					set_fname();
-					ifbinstream out(fname);
-					//------
-					for(int i=0; i<tvec.size(); i++)
+					vector<TaskT> tvec;
+					recv_data<vector<TaskT> >(-other-1, STATUS_CHANNEL, tvec);
+					if(tvec.size() > 0)
 					{
-						out << tvec[i];
+						set_bigTask_fname();
+						ifbinstream out(fname);
+						//------
+						for(int i=0; i<tvec.size(); i++)
+						{
+							out << tvec[i];
+						}
+						out.close();
+						num_stolen += tvec.size();
+						//------
+						//register with "global_file_list"
+						global_bigTask_fileList.enqueue(fname);
+						global_bigTask_file_num ++;
 					}
-					out.close();
-					num_stolen += tvec.size();
-					//------
-					//register with "global_file_list"
-					global_file_list.enqueue(fname);
-					global_file_num ++;
+				}
+				else
+				{
+					vector<TaskT> tvec;
+					if(get_remaining_task_num() > ave_num)
+					//check this since time has passed, and more tasks may have been processed
+					//send empty tvec if no longer a task heavy-hitter
+						bigTask_file2vec(tvec);
+					send_data(tvec, other, STATUS_CHANNEL); //send even if it's empty
 				}
 			}
-			else
+		}
+
+
+		//steal tasks from bigTask queue
+		if(my_single_steal_list.size() != 0)
+		{
+			for(int i=0; i<my_single_steal_list.size(); i++)
 			{
-				vector<TaskT> tvec;
-				if(get_remaining_task_num() > MIN_TASK_NUM_BEFORE_STEALING)
-				//check this since time has passed, and more tasks may have been processed
-				//send empty task-vec if no longer a task heavy-hitter
-					if(locTable2vec(tvec) == false) file2vec(tvec);
-				send_data(tvec, other, STATUS_CHANNEL); //send even if it's empty
+				int other = my_single_steal_list[i];
+				if(other < 0)
+				{
+					vector<TaskT> tvec;
+					recv_data<vector<TaskT> >(-other-1, STATUS_CHANNEL, tvec);
+					for(int i=0; i<tvec.size(); i++)
+					{
+						TaskT * t = new TaskT(tvec[i]);
+						add_bigTask(t);
+					}
+					num_stolen += tvec.size();
+				}
+				else
+				{
+					vector<TaskT> tvec;
+					if(get_remaining_task_num() > ave_num)
+					//check this since time has passed, and more tasks may have been processed
+					//send empty task-vec if no longer a task heavy-hitter
+					{
+						TaskT * task = NULL;
+						TaskQueue& btq = q_bigtask();
+						bigtask_que_lock.lock();
+						if(btq.size() != 0)
+						{
+							task = btq.front();
+							btq.pop_front();
+						}
+						bigtask_que_lock.unlock();
+						if(task != NULL) tvec.push_back(*task);
+					}
+					send_data(tvec, other, STATUS_CHANNEL); //send even if it's empty
+				}
 			}
 		}
+
 		return true;
 	}
 
@@ -628,8 +733,7 @@ public:
 		while(global_end_label == false)
 		{
 			clock_t last_tick = clock();
-			//bool sth2steal = steal_planning();
-			bool sth2steal = false;
+			bool sth2steal = steal_planning();
             status_sync(sth2steal);
             //------
             //reset idle status of Worker, compers will add back if idle

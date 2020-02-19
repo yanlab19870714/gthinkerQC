@@ -26,7 +26,6 @@
 #include "string.h"
 #include <thread>
 #include "Aggregator.h"
-#include <fstream>
 
 using namespace std;
 
@@ -149,6 +148,7 @@ public:
 		if(!succ) return false; //"global_bigTask_fileList" is empty
 		else
 		{
+			global_bigTask_file_num --;
 			ofbinstream in(file.c_str());
 			while(!in.eof())
 			{
@@ -328,16 +328,16 @@ public:
     //set name for big task file
     long long bigFileSeqNo = 1;
     void set_bigTask_fname()
-        {
-        	strcpy(fname, TASK_DISK_BUFFER_DIR.c_str());
-        	sprintf(num, "/bt_%d_", _my_rank);
-        	strcat(fname, num);
-        	sprintf(num, "%d_", thread_rank);
-        	strcat(fname, num);
-        	sprintf(num, "%lld", bigFileSeqNo);
-        	strcat(fname, num);
-        	bigFileSeqNo++;
-        }
+	{
+		strcpy(fname, TASK_DISK_BUFFER_DIR.c_str());
+		sprintf(num, "/bt_%d_", _my_rank);
+		strcat(fname, num);
+		sprintf(num, "%d_", thread_rank);
+		strcat(fname, num);
+		sprintf(num, "%lld", bigFileSeqNo);
+		strcat(fname, num);
+		bigFileSeqNo++;
+	}
 
     //tasks are added to q_task only through this function !!!
     //it flushes tasks as a file to disk when q_task's size goes beyond 3 * TASK_BATCH_NUM
@@ -398,6 +398,7 @@ public:
 			}
 			bigTask_out.close();
 			global_bigTask_fileList.enqueue(fname);
+			global_bigTask_file_num ++;
 		}
 		btq.push_back(task);
     }
