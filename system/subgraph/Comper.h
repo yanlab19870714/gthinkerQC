@@ -150,11 +150,12 @@ public:
 		{
 			global_bigTask_file_num --;
 			ofbinstream in(file.c_str());
+			TaskQueue& btq = q_bigtask();
 			while(!in.eof())
 			{
 				TaskT* task;
 				in >> task;
-				add_bigTask_nolock(task);
+				btq.push_back(task);
 			}
 			in.close();
 
@@ -242,7 +243,7 @@ public:
 			if(btq.size() <= BIG_TASK_FLUSH_BATCH)
 				file2bigTask_queue();
 
-			if(btq.size() != 0)
+			if(!btq.empty())
 			{
 				//fetch big task from big task queue head
 				task = btq.front();
@@ -273,7 +274,7 @@ public:
 				}
 			}
 			//==================================
-			if(q_task.size() == 0)
+			if(q_task.empty())
 			{
 				if(task_spawn_called) return true;
 				else if(push_called) return true;

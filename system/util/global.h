@@ -173,7 +173,7 @@ void* big_task_queue;
 mutex bigtask_que_lock;
 
 void* big_map_task;
-size_t ave_num;
+size_t avg_num;
 //============================
 //general types
 typedef int VertexID;

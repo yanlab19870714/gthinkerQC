@@ -79,7 +79,10 @@ public:
 
 	//check whether task is bigtask
 	virtual bool is_bigtask(){
-		return true;
+		if(to_pull.size() > 100)
+			return true;
+		else
+			return false;
 	}
 
 	//to be used by users in UDF compute(.)
