@@ -233,7 +233,6 @@ public:
     {
     	bool task_spawn_called = false;
     	bool push_called = false;
-    	bool bigTask_push_called = false;
     	//fill the big task queue when there is space
     	TaskQueue& btq = q_bigtask();
 
@@ -278,7 +277,6 @@ public:
 			{
 				if(task_spawn_called) return true;
 				else if(push_called) return true;
-				else if(bigTask_push_called) return true;
 				else return false;
 			}
 			//fetch task from Comper's task queue head

@@ -78,8 +78,9 @@ class CliqueComper:public Comper<QCliqueTask>
 {
 public:
 
-	virtual void task_spawn(VertexT * v)
+	virtual bool task_spawn(VertexT * v)
 	{
+		bool result = false;
 		if(v->value.size() >= min_deg){
 			QCliqueTask * t = new QCliqueTask;
 			t->context.round = 1;
@@ -95,8 +96,10 @@ public:
 			QCVertex root_v;
 			root_v.id = vid;
 			t->subG.addVertex(root_v);//edges are not added until now
+			result = t->is_bigtask();
 			add_task(t);
 		}
+		return result;
 	}
 
 	// After pruning, only those vertices in X and Xcand remain in the pruned g
