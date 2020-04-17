@@ -264,7 +264,9 @@ int cover_prune(QCSubgraph & gs, QCSubgraph & g, vector<QCVertex*> & cand_exts){
 	return max_cover_size;
 }
 
-
+//true iff the case of extending S (excluding S itself) is pruned;
+//ext(S) is passed as a reference,
+//and some elements may be pruned when the function returns
 bool iterative_bounding(vector<QCVertex*>& new_cand, QCSubgraph& new_gs, ofstream & fout){
 	//until Ly > Uy or Z is empty or cand_y is empty
 	 int lb, ub;

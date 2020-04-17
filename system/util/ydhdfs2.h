@@ -38,7 +38,7 @@ using namespace std;
 hdfsFS getHdfsFS()
 {
 	hdfsBuilder * bld = hdfsNewBuilder();
-	hdfsBuilderSetNameNode(bld, "hadoop-master");
+	hdfsBuilderSetNameNode(bld, "jedimaster");
 	hdfsBuilderSetNameNodePort(bld, 9000);
 	hdfsFS fs = hdfsBuilderConnect(bld);
 	if(!fs) {
