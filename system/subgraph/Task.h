@@ -79,7 +79,7 @@ public:
 
 	//check whether task is bigtask
 	virtual bool is_bigtask(){
-		if(to_pull.size() > 100)
+		if(to_pull.size() > bigTask_size)
 			return true;
 		else
 			return false;

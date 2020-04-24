@@ -72,7 +72,7 @@ ifbinstream & operator<<(ifbinstream & m, const ContextValue & c)
 
 typedef Task<QCVertex, ContextValue> QCliqueTask;
 double min_deg; // = ceil(_gamma * (min_size - 1))
-int TIME_THRESHOLD; // if |Xcand| >= DIVIDE_THRESHOLD, split into subtasks
+int DIVIDE_SIZE_THRESHOLD; // if |Xcand| >= DIVIDE_THRESHOLD, split into subtasks
 
 class CliqueComper:public Comper<QCliqueTask>
 {
@@ -324,7 +324,7 @@ public:
     		QCSubgraph & gs = context.gs;
 
     		//---- X, cand, g are ready
-    		if(cand_size <= TIME_THRESHOLD){
+    		if(cand_size <= DIVIDE_SIZE_THRESHOLD){
 				QCQ(gs, g, cand_exts, fout);
 			}else{
 				//split
@@ -439,7 +439,7 @@ int main(int argc, char* argv[])
     int thread_num = atoi(argv[2]);  //number of threads per process
     _gamma = atof(argv[3]);
     min_size = atoi(argv[4]);
-    TIME_THRESHOLD = atoi(argv[5]);
+    DIVIDE_SIZE_THRESHOLD = atoi(argv[5]);
     //min_deg = ceil(_gamma * (min_size - 1));
 
     param.force_write=true;

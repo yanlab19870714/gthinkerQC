@@ -231,6 +231,7 @@ atomic<size_t> num_stolen(0); //number of tasks stolen by the current worker sin
 atomic<size_t>* req_counter; //to count how many requests were sent to each worker
 
 int num_compers;
+int bigTask_size = 100;
 
 //============= to allow long long to be ID =============
 namespace __gnu_cxx {

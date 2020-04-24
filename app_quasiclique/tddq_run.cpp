@@ -207,13 +207,13 @@ public:
 				}
 			} else {
 				// 2. not leaf node
+				bool ext_prune = iterative_bounding(new_cand, new_gs, fout);
+				new_gs_size = new_gs.vertexes.size();
+				new_cand_size = new_cand.size();
+				//-----------------------------------
 				float exe_time = (float)(clock() - init_time)/ CLOCKS_PER_SEC;
 				if(exe_time > TIME_THRESHOLD){
 					//split task if it already run too long
-					bool ext_prune = iterative_bounding(new_cand, new_gs, fout);
-					new_gs_size = new_gs.vertexes.size();
-					new_cand_size = new_cand.size();
-					//-----------------------------------
 					if(!ext_prune && new_cand_size + new_gs_size >= min_size){
 						QCliqueTask * t = new QCliqueTask;
 						//New task's subgraph only include vertex in X or candidate
@@ -231,10 +231,6 @@ public:
 
 				} else {
 					//just run QCQ recursively
-					bool ext_prune = iterative_bounding(new_cand, new_gs, fout);
-					new_gs_size = new_gs.vertexes.size();
-					new_cand_size = new_cand.size();
-					//-----------------------------------
 					if(!ext_prune && new_cand_size + new_gs_size >= min_size){
 						bool bhas_super_qclq = tddq_QCQ(new_gs, g, new_cand, fout, init_time);
 						bhas_qclq = bhas_qclq || bhas_super_qclq;
@@ -462,9 +458,9 @@ int main(int argc, char* argv[])
 {
     init_worker(&argc, &argv);
     WorkerParams param;
-    if(argc != 6){
+    if(argc != 7){
     	cout<<"arg1 = input path in HDFS, arg2 = number of threads"
-    			<<", arg3 = degree ratio, arg4 = min_size, arg5 = time delay threshold"<<endl;
+    			<<", arg3 = degree ratio, arg4 = min_size, arg5 = time delay threshold, arg6 = bigTask_size"<<endl;
     	return -1;
     }
     param.input_path = argv[1];  //input path in HDFS
@@ -472,6 +468,7 @@ int main(int argc, char* argv[])
     _gamma = atof(argv[3]);
     min_size = atoi(argv[4]);
     TIME_THRESHOLD = atoi(argv[5]);
+    bigTask_size = atoi(argv[6]);
     //min_deg = ceil(_gamma * (min_size - 1));
 
     param.force_write=true;
