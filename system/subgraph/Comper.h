@@ -291,13 +291,13 @@ public:
     	//init-ed to be true since:
     	//1. if it is newly spawned, should allow it to run
     	//2. if compute(.) returns false, should be filtered already, won't be popped
-    	while(task->pull_all(counter, task->is_bigtask() ? get_big_maptask() : map_task)) //may call add2map(.)
+    	while(task->pull_all(counter, is_bigtask(task) ? get_big_maptask() : map_task)) //may call add2map(.)
     	{
     		go = compute(task);
     		task->unlock_all();
     		if(go == false)
     		{
-    			if(task->is_bigtask())
+    			if(is_bigtask(task))
     				global_tasknum_vec[num_compers]++;
     			else
     				global_tasknum_vec[thread_rank]++;
@@ -338,11 +338,19 @@ public:
 		bigFileSeqNo++;
 	}
 
+	//check whether task is bigtask
+	virtual bool is_bigtask(TaskT * task){
+		if(task->subG.vertexes.size() > BIGTASK_THRESHOLD)
+			return true;
+		else
+			return false;
+	}
+
     //tasks are added to q_task only through this function !!!
     //it flushes tasks as a file to disk when q_task's size goes beyond 3 * TASK_BATCH_NUM
     void add_task(TaskT * task) //!!! do not use "task" after this call !!! (may already be serialized to disk)
     {
-    	if(task->is_bigtask()){
+    	if(is_bigtask(task)){
     		unique_lock<mutex> lck(bigtask_que_lock);
     		add_bigTask_nolock(task);
     	} else add_smallTask(task);

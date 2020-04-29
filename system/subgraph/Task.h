@@ -77,14 +77,6 @@ public:
 	virtual bool compute(SubgraphT & g, ContextType & context, vector<VertexType *> & frontier) = 0;
 	*/
 
-	//check whether task is bigtask
-	virtual bool is_bigtask(){
-		if(to_pull.size() > bigTask_size)
-			return true;
-		else
-			return false;
-	}
-
 	//to be used by users in UDF compute(.)
 	void pull(KeyT id){
 		to_pull.push_back(id);

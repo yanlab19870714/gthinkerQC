@@ -69,14 +69,22 @@ ifbinstream & operator<<(ifbinstream & m, const ContextValue & c)
 }
 
 //-------------------------------------------
-
 typedef Task<QCVertex, ContextValue> QCliqueTask;
+
 double min_deg; // = ceil(_gamma * (min_size - 1))
-int TIME_THRESHOLD; // if running time >= TIME_THRESHOLD, split into subtasks
+float TIME_THRESHOLD; // if running time >= TIME_THRESHOLD, split into subtasks
 
 class CliqueComper:public Comper<QCliqueTask>
 {
 public:
+
+	//check whether task is bigtask
+	virtual bool is_bigtask(QCliqueTask * task){
+		if(task->context.cand_id_vec.size() > BIGTASK_THRESHOLD)
+			return true;
+		else
+			return false;
+	}
 
 	virtual bool task_spawn(VertexT * v)
 	{
@@ -96,7 +104,7 @@ public:
 			QCVertex root_v;
 			root_v.id = vid;
 			t->subG.addVertex(root_v);//edges are not added until now
-			result = t->is_bigtask();
+			result = is_bigtask(t);
 			add_task(t);
 		}
 		return result;
@@ -163,7 +171,7 @@ public:
 	}
 
 	bool tddq_QCQ(QCSubgraph & gs, QCSubgraph & g, vector<QCVertex*> & cand_exts,
-			ofstream & fout, clock_t & init_time){
+			ofstream & fout, chrono::steady_clock::time_point & init_time){
 		vector<QCVertex>& vertices = g.vertexes;
 		int cand_size = cand_exts.size();
 		//----
@@ -211,7 +219,8 @@ public:
 				new_gs_size = new_gs.vertexes.size();
 				new_cand_size = new_cand.size();
 				//-----------------------------------
-				float exe_time = (float)(clock() - init_time)/ CLOCKS_PER_SEC;
+				auto end = chrono::steady_clock::now();
+				float exe_time = (float)chrono::duration_cast<chrono::milliseconds>(end - init_time).count()/1000.0;
 				if(exe_time > TIME_THRESHOLD){
 					//split task if it already run too long
 					if(!ext_prune && new_cand_size + new_gs_size >= min_size){
@@ -402,7 +411,7 @@ public:
 			for(int i = 0; i < cand_vec_size; i++){
 				cand_exts.push_back(g.getVertex(cand_id_vec[i]));
 			}
-			clock_t init_time = clock();
+			auto init_time = chrono::steady_clock::now();
 
     		tddq_QCQ(context.gs, g, cand_exts, fout, init_time);
     		return false;
@@ -460,15 +469,15 @@ int main(int argc, char* argv[])
     WorkerParams param;
     if(argc != 7){
     	cout<<"arg1 = input path in HDFS, arg2 = number of threads"
-    			<<", arg3 = degree ratio, arg4 = min_size, arg5 = time delay threshold, arg6 = bigTask_size"<<endl;
+    			<<", arg3 = degree ratio, arg4 = min_size, arg5 = time delay threshold, arg6 = BIGTASK_THRESHOLD"<<endl;
     	return -1;
     }
     param.input_path = argv[1];  //input path in HDFS
     int thread_num = atoi(argv[2]);  //number of threads per process
     _gamma = atof(argv[3]);
     min_size = atoi(argv[4]);
-    TIME_THRESHOLD = atoi(argv[5]);
-    bigTask_size = atoi(argv[6]);
+    TIME_THRESHOLD = atof(argv[5]);
+    BIGTASK_THRESHOLD = atoi(argv[6]);
     //min_deg = ceil(_gamma * (min_size - 1));
 
     param.force_write=true;
