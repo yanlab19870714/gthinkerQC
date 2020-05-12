@@ -80,7 +80,8 @@ public:
 
 	//check whether task is bigtask
 	virtual bool is_bigtask(QCliqueTask * task){
-		if(task->context.cand_id_vec.size() > BIGTASK_THRESHOLD)
+		if(task->context.cand_id_vec.size() > BIGTASK_THRESHOLD
+				||task->to_pull.size() > BIGTASK_THRESHOLD)
 			return true;
 		else
 			return false;

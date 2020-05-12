@@ -340,7 +340,8 @@ public:
 
 	//check whether task is bigtask
 	virtual bool is_bigtask(TaskT * task){
-		if(task->subG.vertexes.size() > BIGTASK_THRESHOLD)
+		if(task->subG.vertexes.size() > BIGTASK_THRESHOLD
+				|| task->to_pull.size() > BIGTASK_THRESHOLD)
 			return true;
 		else
 			return false;
