@@ -14,7 +14,14 @@
 //## limitations under the License.
 //########################################################################
 
-#include "subg-dev.h"
+#include "kcore.h"
+#define hash_set __gnu_cxx::hash_set
+
+using namespace std;
+typedef int VertexID;
+
+using get_time = chrono::high_resolution_clock;
+using ms = chrono::microseconds;
 
 bool COVER_VERTEX_PRUNE = true;
 bool LOOKAHEAD_PRUNE = true;
@@ -22,23 +29,29 @@ bool UPPER_BOUND_PRUNE = true;
 bool LOWER_BOUND_PRUNE = true;
 bool CRITICAL_VERTEX_PRUNE = true;
 
-typedef vector<VertexID> QCValue;
-//typedef Vertex<VertexID, QCValue> QCVertex;
-class QCVertex:public Vertex <VertexID, QCValue>
-{
-public:
-	virtual void set_degree(size_t & degree)
-	{
-		degree = value.size();
-	}
-};
-typedef Subgraph<QCVertex> QCSubgraph;
-
 using get_time = chrono::high_resolution_clock;
 using ms = chrono::microseconds;
 
 double _gamma;
 int min_size;
+
+void load(char* fname, map<VertexID, kc_value>& g_map) {
+	ifstream in(fname);
+	VertexID vid;
+	int temp, num;
+	while(in >> vid)
+	{
+		g_map[vid].del = false;
+		in >> num;
+		QCValue nbs;
+		for(int i=0; i<num; i++)
+		{
+			in >> temp;
+			g_map[vid].nbs.insert(temp);
+		}
+	}
+    in.close();
+}
 
 //add vertex from cand_exts to X
 void add_vertex(QCSubgraph & new_g, QCVertex * v) {
@@ -547,4 +560,65 @@ bool QCQ(QCSubgraph & gs, QCSubgraph & g, vector<QCVertex*> & cand_exts, ofstrea
 		}
 	}
 	return bhas_qclq;
+}
+
+int main(int argc, char* argv[])
+{
+    if(argc != 4)
+    {
+        cout<<"arg1 = input file name, arg2 = degree ratio, arg3 = min_size"<<endl;
+        return -1;
+    }
+    string fn = argv[1];
+    _gamma = atof(argv[2]);
+    min_size = atoi(argv[3]);
+    int min_deg = ceil(_gamma * (min_size - 1));
+    QCSubgraph g;
+    map<VertexID, kc_value> g_map;
+	load(argv[1], g_map);
+
+    cout<<"loaded"<<endl;
+
+    vector<VertexID> to_del; //output of k-core pruning
+	for(auto it = g_map.begin(); it != g_map.end(); ++it)
+	{
+		kc_value & val = it->second;
+		if(val.nbs.size() < min_deg)
+			if(!val.del) prune(it->first, val, g_map, min_deg, to_del);
+	}
+	//now, g_map is degree-pruned
+	//do the actual deletes
+	for(auto it = to_del.begin(); it != to_del.end(); ++it) g_map.erase(*it);
+	//check all adj-items in g_map
+	//-- if item is not in 1-hop, move to to_pull
+	//-- we remove the item from g_map, since it may be pruned in round 2
+	for(auto it = g_map.begin(); it != g_map.end(); ++it){
+		QCVertex v;
+		v.id = it->first;
+		set<VertexID> & nbs = it->second.nbs;
+		QCValue adj_temp;
+		for(auto itr = nbs.begin(); itr != nbs.end(); ++itr){
+			adj_temp.push_back(*itr);
+		}
+		v.value.swap(adj_temp);
+		g.addVertex(v);
+	}
+
+	QCSubgraph sg;
+	vector<QCVertex*> cand_exts;
+	vector<QCVertex> & g_vertex = g.vertexes;
+	for(int i=0; i < g_vertex.size(); i++){
+		cand_exts.push_back(&g_vertex[i]);
+	}
+
+	string report_path = fn + "_output";
+	ofstream fout;
+	fout.open(report_path);
+    auto Start = get_time::now();
+    QCQ(sg, g, cand_exts, fout);
+    auto  End = get_time::now();
+    auto elapsedTime = chrono::duration_cast<ms>(End - Start);
+    cout<<"time: "<<elapsedTime.count()<<endl;
+    fout.close();
+    return 0;
 }
