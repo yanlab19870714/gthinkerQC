@@ -19,8 +19,10 @@
 //2. in spawn, if degree too low (w.r.t. gamma & min_size), prune (ToDo)
 //3. for pulled vertices, prune it if degree too low
 
-#include "kcore.h"
-//#include <chrono>
+#include <algorithm>
+
+#include "../deprecated_version/kcore.h"
+int COMPACT_SIZE = 10;
 
 struct ContextValue
 {
@@ -112,8 +114,8 @@ public:
 	}
 
 	// After pruning, only those vertices in X and Xcand remain in the pruned g
-	void graph_shrink(QCSubgraph & pre_gs, vector<QCVertex*> & cand, QCSubgraph & shrinked_G,
-			vector<VertexID>& cand_id_vec, QCSubgraph & task_gs){
+	void graph_shrink(QCSubgraph & pre_gs, vector<QCVertex*> & cand, QCSubgraph & g,
+			QCSubgraph & shrinked_G, vector<VertexID>& cand_id_vec){
 		//Input:
 		//  pre_gs is the subgraph induced by X
 		//  cand is Xcand
@@ -136,43 +138,175 @@ public:
 
 		//For each vertex in X, delete the adj-items not in remain_set
 		for(int i = 0; i < new_gs_size; i++){
-			QCVertex & v = vertices[i];
-			QCValue & v_adj = v.value;
-			QCVertex new_v;
-			new_v.id = v.id;
-			QCValue & new_adj = new_v.value;
-			for(int j = 0; j < v_adj.size(); j++){
-				VertexID adj_id = v_adj[j];
-				if(remain_set.find(adj_id) != remain_set.end()){
-					new_adj.push_back(adj_id);
-				}
-			}
-			//add cleansed new vertex into new_X and pruned_g
-			task_gs.addVertex(new_v);
-			shrinked_G.addVertex(new_v);
+			QCVertex* it = g.getVertex(vertices[i].id);
+			QCVertex v;
+			v.id = it->id;
+			QCValue temp_nbs;
+			for(VertexID adj : it->value)
+				if(remain_set.find(adj) != remain_set.end())
+					temp_nbs.push_back(adj);
+
+			v.value.swap(temp_nbs);
+			shrinked_G.addVertex(v);
 		}
 
 		//For each vertex in Xcand, delete the adj-items not in remain_set
 		for(int i = 0; i < cand_size; i++){
-			QCVertex* v = cand[i];
-			QCValue & v_adj = v->value;
-			QCVertex new_v;
-			new_v.id = v->id;
-			QCValue & new_adj = new_v.value;
-			for(int j = 0; j < v_adj.size(); j++){
-				VertexID adj_id = v_adj[j];
-				if(remain_set.find(adj_id) != remain_set.end()){
-					new_adj.push_back(adj_id);
-				}
+			QCVertex v;
+			v.id = cand[i]->id;
+
+			QCValue temp_nbs;
+			for(VertexID adj: cand[i]->value)
+				if(remain_set.find(adj) != remain_set.end())
+					temp_nbs.push_back(adj);
+
+			cand_id_vec.push_back(v.id);
+			v.value.swap(temp_nbs);
+			shrinked_G.addVertex(v);
+		}
+	}
+
+
+	//revise 5: shrink g
+	void compact_graph(QCSubgraph & gs, vector<QCVertex*> & cand, QCSubgraph & g,
+			QCSubgraph & new_g)
+	{
+		//get the set of gs and cand ==> 2-hop-set  //which will ingore checking v before gs
+		//create new_g based on 2-hop-set using g
+		//the cand is QCVertex*, so it will change in new_g... be careful.
+		set<VertexID> s_cand_set; //Union of gs and cand
+		for(auto v : gs.vertexes)
+			s_cand_set.insert(v.id);
+		for(auto v : cand)
+			s_cand_set.insert(v->id);
+
+
+		for(auto sv : gs.vertexes)
+		{
+			QCVertex* it = g.getVertex(sv.id);
+			QCVertex v;
+			v.id = it->id;
+			QCValue temp_nbs;
+			for(VertexID adj : it->value)
+				if(s_cand_set.find(adj) != s_cand_set.end())
+					temp_nbs.push_back(adj);
+			v.value.swap(temp_nbs);
+			new_g.addVertex(v);
+		}
+
+		for(auto cv : cand)
+		{
+			QCVertex v;
+			v.id  = cv->id;
+
+			QCValue temp_nbs;
+			for(VertexID adj: cv->value)
+				if(s_cand_set.find(adj) != s_cand_set.end())
+					temp_nbs.push_back(adj);
+
+			v.value.swap(temp_nbs);
+			new_g.addVertex(v);
+		}
+
+		vector<QCVertex*> new_cand;
+		for(auto v : cand)
+			new_cand.push_back(new_g.getVertex(v->id));
+		cand.swap(new_cand);
+	}
+
+	struct deg_sorter{
+		QCVertex* v;
+		int indeg = 0;
+		int exdeg = 0;
+	};
+	static bool comp(const deg_sorter &x, const deg_sorter &y)
+	{
+		if(x.indeg == y.indeg)
+		{
+			if(x.exdeg == y.exdeg)
+				return x.v->id < y.v->id;
+			else
+				return x.exdeg < y.exdeg;
+		}
+		else
+			return x.indeg < y.indeg;
+	}
+
+	void get_cand_deg(vector<QCVertex*>& cand, QCSubgraph& X_g, vector<deg_sorter>& cand_deg)
+	{
+		set<VertexID> cand_set;
+		for(auto v:cand)
+			cand_set.insert(v->id);
+
+		int n_cand = cand.size();
+		hash_map<VertexID, int> & Xg_map = X_g.vmap;
+//		cand_deg[0].v = cand[0];
+	//	for (int j = 1; j < n_cand; j++)
+		for (int j = 0; j < n_cand; j++)
+		{
+			cand_deg[j].v = cand[j];
+			QCValue & cand_j_adj = cand[j]->value;
+			int adj_size = cand_j_adj.size();
+			for (int k = 0; k < adj_size; k++)
+			{
+				VertexID nb = cand_j_adj[k];
+				if(Xg_map.find(nb) != Xg_map.end())
+					cand_deg[j].indeg++;
+				if(cand_set.find(nb) != cand_set.end())
+					cand_deg[j].exdeg++;
 			}
-			//add cleansed new vertex into new_Xcand and pruned_g
-			cand_id_vec.push_back(new_v.id);
-			shrinked_G.addVertex(new_v);
+		}
+	}
+
+	void get_cand_deg_1st(vector<QCVertex*>& cand, vector<deg_sorter>& cand_deg)
+	{
+		int n_cand = cand.size();
+//		cand_deg[0].v = cand[0];
+//		for (int j = 1; j < n_cand; j++)
+		for (int j = 0; j < n_cand; j++)
+		{
+			cand_deg[j].v = cand[j];
+			cand_deg[j].exdeg = cand[j]->value.size();
+		}
+	}
+
+	void sort_deg(vector<QCVertex*> & cand_exts, QCSubgraph & gs){
+		vector<deg_sorter> cand_deg(cand_exts.size());
+		if(!gs.vertexes.empty())
+			get_cand_deg(cand_exts, gs, cand_deg);
+		else
+			get_cand_deg_1st(cand_exts, cand_deg);
+		sort(cand_deg.begin(), cand_deg.end(), comp);
+//		sort(cand_deg.begin()+1, cand_deg.end(),comp);
+		cand_exts.clear();
+		for(auto c: cand_deg)
+			cand_exts.push_back(c.v);
+	}
+
+	//set the 2hop set in g_map
+	void set_2hop(map<VertexID, kc_value>& g_map)
+	{
+		for(auto it = g_map.begin(); it != g_map.end(); ++it)
+		{
+			VertexID vid = it->first;
+			kc_value & val = it->second;
+			set<VertexID>& nbs = val.nbs;
+			set<VertexID>& nbs_2hop = val.nbs2hop;
+			for(auto nb : nbs)
+			{
+				nbs_2hop.insert(nb);
+				auto nb_it = g_map.find(nb);
+				assert(nb_it != g_map.end());
+				set<VertexID>& nb_nbs = nb_it->second.nbs;
+				if(!nb_nbs.empty())
+					nbs_2hop.insert(nb_nbs.begin(), nb_nbs.end());
+			}
 		}
 	}
 
 	bool tddq_QCQ(QCSubgraph & gs, QCSubgraph & g, vector<QCVertex*> & cand_exts,
 			ofstream & fout, chrono::steady_clock::time_point & init_time){
+		sort_deg(cand_exts, gs);
 		vector<QCVertex>& vertices = g.vertexes;
 		int cand_size = cand_exts.size();
 		//----
@@ -216,7 +350,7 @@ public:
 				}
 			} else {
 				// 2. not leaf node
-				bool ext_prune = iterative_bounding(new_cand, new_gs, fout);
+				bool ext_prune = iterative_bounding(new_cand, new_gs, fout, g);
 				new_gs_size = new_gs.vertexes.size();
 				new_cand_size = new_cand.size();
 				//-----------------------------------
@@ -227,8 +361,9 @@ public:
 					if(!ext_prune && new_cand_size + new_gs_size >= min_size){
 						QCliqueTask * t = new QCliqueTask;
 						//New task's subgraph only include vertex in X or candidate
-						graph_shrink(new_gs, new_cand, t->subG,
-								t->context.cand_id_vec, t->context.gs);
+						t->context.gs = new_gs;
+						graph_shrink(new_gs, new_cand, g, t->subG,
+								t->context.cand_id_vec);
 						t->context.round = 3;
 						add_task(t);
 					}
@@ -242,7 +377,17 @@ public:
 				} else {
 					//just run QCQ recursively
 					if(!ext_prune && new_cand_size + new_gs_size >= min_size){
-						bool bhas_super_qclq = tddq_QCQ(new_gs, g, new_cand, fout, init_time);
+						bool bhas_super_qclq;
+						if((new_cand_size+new_gs_size)*2 < g.vertexes.size()
+								&& g.vertexes.size() > COMPACT_SIZE)
+						{
+							QCSubgraph new_g;
+							compact_graph(new_gs, new_cand, g, new_g);
+							bhas_super_qclq = tddq_QCQ(new_gs, new_g, new_cand, fout, init_time);
+						} else {
+							bhas_super_qclq = tddq_QCQ(new_gs, g, new_cand, fout, init_time);
+						}
+
 						bhas_qclq = bhas_qclq || bhas_super_qclq;
 						if (!bhas_super_qclq && new_gs_size >= min_size && is_QC(new_gs)) {
 							bhas_qclq = true;
@@ -301,7 +446,7 @@ public:
 			{
 				kc_value & val = it->second;
 				if(val.nbs.size() < min_deg)
-					if(!val.del) prune(it->first, val, g_map, min_deg, to_del);
+					if(!val.del) prune_1hop(it->first, val, g_map, min_deg, to_del);
 			}
     		//now, g_map is degree-pruned
 			//#5_1. see whether root_id is still not pruned
@@ -355,20 +500,24 @@ public:
 				}
 			}
 
+			//revise: add 2hop prune
+			QCHopSubgraph g_2hop;
+			set_2hop(g_map);
+
 			//#9. kcore prune 2_hop g_map
     		vector<VertexID> to_del;
 			for(auto it = g_map.begin(); it != g_map.end(); ++it)
 			{
 				kc_value & val = it->second;
-				if(val.nbs.size() < min_deg)
-					if(!val.del) prune(it->first, val, g_map, min_deg, to_del);
+				if(val.nbs.size() < min_deg || val.nbs2hop.size() < min_size - 1)
+					if(!val.del) prune_2hop(it->first, val, g_map, min_deg, min_size, to_del);
 			}
 			//now, g_map is degree-pruned
 			//see whether root_id is still not pruned
 			if(g_map[rootID].del) return false; //the task terminates
 			//do the actual deletes
 			for(auto it = to_del.begin(); it != to_del.end(); ++it) g_map.erase(*it);
-
+			if(g_map.size() < min_size) return false;
 			//#10. convert the g_map to graph
 			g.vertexes.clear();
 			g.vmap.clear();
@@ -412,9 +561,14 @@ public:
 			for(int i = 0; i < cand_vec_size; i++){
 				cand_exts.push_back(g.getVertex(cand_id_vec[i]));
 			}
+
+			sort_deg(cand_exts, context.gs);
 			auto init_time = chrono::steady_clock::now();
 
-    		tddq_QCQ(context.gs, g, cand_exts, fout, init_time);
+			QCSubgraph new_g;
+			compact_graph(context.gs, cand_exts, g, new_g);
+
+    		tddq_QCQ(context.gs, new_g, cand_exts, fout, init_time);
     		return false;
     	}
     }

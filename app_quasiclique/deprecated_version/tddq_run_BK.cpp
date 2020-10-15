@@ -19,7 +19,7 @@
 //2. in spawn, if degree too low (w.r.t. gamma & min_size), prune (ToDo)
 //3. for pulled vertices, prune it if degree too low
 
-#include "kcore.h"
+#include "../deprecated_version/kcore.h"
 //#include <chrono>
 
 struct ContextValue
@@ -69,14 +69,23 @@ ifbinstream & operator<<(ifbinstream & m, const ContextValue & c)
 }
 
 //-------------------------------------------
-
 typedef Task<QCVertex, ContextValue> QCliqueTask;
+
 double min_deg; // = ceil(_gamma * (min_size - 1))
-int DIVIDE_SIZE_THRESHOLD; // if |Xcand| >= DIVIDE_THRESHOLD, split into subtasks
+float TIME_THRESHOLD; // if running time >= TIME_THRESHOLD, split into subtasks
 
 class CliqueComper:public Comper<QCliqueTask>
 {
 public:
+
+	//check whether task is bigtask
+	virtual bool is_bigtask(QCliqueTask * task){
+		if(task->context.cand_id_vec.size() > BIGTASK_THRESHOLD
+				||task->to_pull.size() > BIGTASK_THRESHOLD)
+			return true;
+		else
+			return false;
+	}
 
 	virtual bool task_spawn(VertexT * v)
 	{
@@ -96,7 +105,7 @@ public:
 			QCVertex root_v;
 			root_v.id = vid;
 			t->subG.addVertex(root_v);//edges are not added until now
-			result = t->is_bigtask();
+			result = is_bigtask(t);
 			add_task(t);
 		}
 		return result;
@@ -160,6 +169,90 @@ public:
 			cand_id_vec.push_back(new_v.id);
 			shrinked_G.addVertex(new_v);
 		}
+	}
+
+	bool tddq_QCQ(QCSubgraph & gs, QCSubgraph & g, vector<QCVertex*> & cand_exts,
+			ofstream & fout, chrono::steady_clock::time_point & init_time){
+		vector<QCVertex>& vertices = g.vertexes;
+		int cand_size = cand_exts.size();
+		//----
+		int gs_size = gs.vertexes.size();
+		bool bhas_qclq = false;
+		int cover_size = COVER_VERTEX_PRUNE ? cover_prune(gs, g, cand_exts) : 0;
+		for(int i = 0; i < cand_size - cover_size; i++){
+			if ((gs_size + cand_size - i) < min_size)
+				return false;
+
+			//whether the union of subgraph with candidate is QCQ
+			if(LOOKAHEAD_PRUNE){
+				QCSubgraph union_q = gs;
+				for (int k = i; k < cand_size; k++)
+					add_vertex(union_q, cand_exts[k]);
+
+				if (is_QC(union_q)) {
+					output_qcq(union_q, fout);
+					return false;
+				}
+			}
+
+			QCVertex * v = cand_exts[i];
+			QCSubgraph new_gs = gs;
+			add_vertex(new_gs, v);
+
+			//construct new candidate
+
+			vector<QCVertex*> new_cand;
+			new_cand.insert(new_cand.begin(), cand_exts.begin() + i + 1,
+					cand_exts.end());
+			filter_by_2hop(new_cand, v, g);
+			int new_gs_size = new_gs.vertexes.size();
+			int new_cand_size = new_cand.size();
+			//-----------
+			// 1. leaf node in search space
+			if (new_cand_size == 0) {
+				if (new_gs_size >= min_size && is_QC(new_gs)) {
+					bhas_qclq = true;
+					output_qcq(new_gs, fout);
+				}
+			} else {
+				// 2. not leaf node
+				bool ext_prune = iterative_bounding(new_cand, new_gs, fout);
+				new_gs_size = new_gs.vertexes.size();
+				new_cand_size = new_cand.size();
+				//-----------------------------------
+				auto end = chrono::steady_clock::now();
+				float exe_time = (float)chrono::duration_cast<chrono::milliseconds>(end - init_time).count()/1000.0;
+				if(exe_time > TIME_THRESHOLD){
+					//split task if it already run too long
+					if(!ext_prune && new_cand_size + new_gs_size >= min_size){
+						QCliqueTask * t = new QCliqueTask;
+						//New task's subgraph only include vertex in X or candidate
+						graph_shrink(new_gs, new_cand, t->subG,
+								t->context.cand_id_vec, t->context.gs);
+						t->context.round = 3;
+						add_task(t);
+					}
+
+					//check whether current X is_QC
+					if (new_gs_size >= min_size && is_QC(new_gs)){
+						bhas_qclq = true;
+						output_qcq(new_gs, fout);
+					}
+
+				} else {
+					//just run QCQ recursively
+					if(!ext_prune && new_cand_size + new_gs_size >= min_size){
+						bool bhas_super_qclq = tddq_QCQ(new_gs, g, new_cand, fout, init_time);
+						bhas_qclq = bhas_qclq || bhas_super_qclq;
+						if (!bhas_super_qclq && new_gs_size >= min_size && is_QC(new_gs)) {
+							bhas_qclq = true;
+							output_qcq(new_gs, fout);
+						}
+					}
+				}
+			}
+		}
+		return bhas_qclq;
 	}
 
     virtual bool compute(SubgraphT & g, ContextT & context, vector<VertexT *> & frontier)
@@ -311,72 +404,17 @@ public:
 			return true;
 			//### since there is no vertex requested, step 3 will run directly
 			//### so we only need round 3 to call QCQ to simplify code
-    	}else{ //context.round == 3
-    		//#12. check cand_size for later split.
-    		vector<QCVertex*> cand_exts;
-    		vector<QCVertex>& vertices = g.vertexes;
-    		vector<VertexID>& cand_id_vec = context.cand_id_vec;
-    		int cand_size = cand_id_vec.size();
-    		for(int i = 0; i < cand_size; i++){
-    			cand_exts.push_back(g.getVertex(cand_id_vec[i]));
-    		}
-    		//sort(cand_exts.begin(), cand_exts.end(), comp);
-    		QCSubgraph & gs = context.gs;
-
-    		//---- X, cand, g are ready
-    		if(cand_size <= DIVIDE_SIZE_THRESHOLD){
-				QCQ(gs, g, cand_exts, fout);
-			}else{
-				//split
-				int gs_size = gs.vertexes.size();
-				int cover_size = COVER_VERTEX_PRUNE ? cover_prune(gs, g, cand_exts) : 0;
-				for(int i = 0; i < cand_size - cover_size; i++){
-					if ((gs_size + cand_size - i) < min_size)
-						return false;
-
-					//whether the union of subgraph with candidate is QCQ
-					if(LOOKAHEAD_PRUNE){
-						QCSubgraph union_q = gs;
-						for (int k = i; k < cand_size; k++)
-							add_vertex(union_q, cand_exts[k]);
-
-						if (is_QC(union_q)) {
-							output_qcq(union_q, fout);
-							return false;
-						}
-					}
-
-					QCVertex * v = cand_exts[i];
-					QCSubgraph new_gs = gs;
-					add_vertex(new_gs, v);
-
-					//construct new candidate
-
-					vector<QCVertex*> new_cand;
-					new_cand.insert(new_cand.begin(), cand_exts.begin() + i + 1,
-							cand_exts.end());
-					filter_by_2hop(new_cand, v, g);
-					int new_gs_size = new_gs.vertexes.size();
-					int new_cand_size = new_cand.size();
-					//-----------
-					if (new_gs_size >= min_size && is_QC(new_gs))
-						output_qcq(new_gs, fout);
-
-					bool ext_prune = iterative_bounding(new_cand, new_gs, fout);
-					//get new cand and new subg after prune
-					new_gs_size = new_gs.vertexes.size();
-					new_cand_size = new_cand.size();
-					//-----------------------------------
-					if(!ext_prune && new_cand_size + new_gs_size >= min_size){
-						QCliqueTask * t = new QCliqueTask;
-						//New task's subgraph only include vertex in X or candidate
-						graph_shrink(new_gs, new_cand, t->subG,
-								t->context.cand_id_vec, t->context.gs);
-						t->context.round = 3;
-						add_task(t);
-					}
-				}
+    	}else{
+    		//context.round == 3
+			vector<QCVertex*> cand_exts;
+			vector<VertexID>& cand_id_vec = context.cand_id_vec;
+			int cand_vec_size = cand_id_vec.size();
+			for(int i = 0; i < cand_vec_size; i++){
+				cand_exts.push_back(g.getVertex(cand_id_vec[i]));
 			}
+			auto init_time = chrono::steady_clock::now();
+
+    		tddq_QCQ(context.gs, g, cand_exts, fout, init_time);
     		return false;
     	}
     }
@@ -430,16 +468,17 @@ int main(int argc, char* argv[])
 {
     init_worker(&argc, &argv);
     WorkerParams param;
-    if(argc != 6){
+    if(argc != 7){
     	cout<<"arg1 = input path in HDFS, arg2 = number of threads"
-    			<<", arg3 = degree ratio, arg4 = min_size, arg5 = divide threshold"<<endl;
+    			<<", arg3 = degree ratio, arg4 = min_size, arg5 = time delay threshold, arg6 = BIGTASK_THRESHOLD"<<endl;
     	return -1;
     }
     param.input_path = argv[1];  //input path in HDFS
     int thread_num = atoi(argv[2]);  //number of threads per process
     _gamma = atof(argv[3]);
     min_size = atoi(argv[4]);
-    DIVIDE_SIZE_THRESHOLD = atoi(argv[5]);
+    TIME_THRESHOLD = atof(argv[5]);
+    BIGTASK_THRESHOLD = atoi(argv[6]);
     //min_deg = ceil(_gamma * (min_size - 1));
 
     param.force_write=true;

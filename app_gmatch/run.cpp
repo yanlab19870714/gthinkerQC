@@ -277,7 +277,15 @@ size_t graph_matching(GMatchSubgraph & g)
 class GMatchComper:public Comper<GMatchTask, GMatchAgg>
 {
 public:
-    virtual void task_spawn(VertexT * v)
+	virtual bool is_bigtask(GMatchTask * task){
+		if(task->subG.vertexes.size() > BIGTASK_THRESHOLD
+					|| task->to_pull.size() > BIGTASK_THRESHOLD)
+			return true;
+		else
+			return false;
+	}
+
+    virtual bool task_spawn(VertexT * v)
     {
     	if(v->value.l == 'a')
     	{
@@ -298,8 +306,13 @@ public:
 					t->pull(nbs[i].id);
 					has_c = true;
 				}
-			if(has_b && has_c) add_task(t);
+			bool result = false;
+			if(has_b && has_c){
+				result = is_bigtask(t);
+				add_task(t);
+			}
             else delete t;
+			return result;
     	}
     }
 
@@ -479,8 +492,13 @@ int main(int argc, char* argv[])
 {
     init_worker(&argc, &argv);
     WorkerParams param;
+    if(argc != 4){
+		cout<<"arg1 = input path in HDFS, arg2 = number of threads, arg3 = BIGTASK_THRESHOLD"<<endl;
+		return -1;
+	}
     param.input_path = argv[1];  //input path in HDFS
     int thread_num = atoi(argv[2]);  //number of threads per process
+    BIGTASK_THRESHOLD = atoi(argv[3]);
     param.force_write=true;
     param.native_dispatcher=false;
     //------

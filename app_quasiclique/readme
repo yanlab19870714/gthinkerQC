@@ -1,0 +1,51 @@
+========== how to recode data ========== 
+In single-thread/app_quasiclique/, we have two recode code:
+(1) recode without kcore prune (run_graph_recode_non_kcore.cpp)
+a). copy its cpp file to "run.cpp". 
+b). make
+c). ./run file_name_to_recode
+Then you will get file_name"_non_kcore"
+
+(2) recode with kcore prune (run_graph_recode.cpp)
+
+a). copy its cpp file to "run.cpp". 
+b). make
+c). ./run file_name_to_recode gamma minsize
+Then you will get file_name"_non_kcore"
+
+========== different version of quasiclique code ==========
+
+1. recode_free_version
+This version will run non_divide_conquer quasiclique. It don't require to recode the dataset. But it will be slow as it miss the first round prune.
+how to run:
+(1) make
+(2) mpiexec -n 16 -f host_file ./run data_on_hdfs thread_number gamma minsize bigTask_threshold;
+
+2. basic_version
+This version will run non_divide_conquer quasiclique.
+how to run:
+(1) recode you dataset using the recode tool in "single-thread" folder
+(2) make;
+(3) mpiexec -n 16 -f host_file ./run recoded_data_on_hdfs thread_number gamma minsize bigTask_threshold;
+
+3. divide_conquer_version
+For this version, we have 2 way to split the task 
+(1) based on the size (quick_tddq_run.cpp)
+(2) based on the time (quick_size_split_run.cpp)
+how to run:
+(1) recode the graph
+(2) copy the code you want to run as "run.cpp"
+(3) make
+(4) 
+for quick_tddq_run.cpp
+mpiexec -n 16 -f host_file ./run recoded_data_on_hdfs thread_number gamma minsize bigTask_threshold;
+for quick_size_split_run.cpp
+mpiexec -n 16 -f host_file ./run recoded_data_on_hdfs thread_number gamma minsize split_time_threshold bigTask_threshold;
+
+
+========== maximal check ========== 
+The code to get the maximal results is under maximal_check folder. 
+1) make 
+2) ./quasiCliques quasiclique_result output_name 
+
+

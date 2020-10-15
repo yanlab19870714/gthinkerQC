@@ -141,6 +141,7 @@ public:
     	}
     	membuf[bufpos] = c;
     	bufpos++;
+    	assert(bufpos <= STREAM_MEMBUF_SIZE);
         totpos++;
     }
 
@@ -170,6 +171,7 @@ public:
     	{
     		memcpy(membuf + bufpos, ptr, size);
     		bufpos += size;
+    		assert(bufpos <= STREAM_MEMBUF_SIZE);
     	}
     }
 

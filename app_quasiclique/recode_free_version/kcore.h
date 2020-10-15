@@ -14,22 +14,7 @@
 //## limitations under the License.
 //########################################################################
 
-//#include "quasiclique.h"
-#include "Vertex.h"
-#include "Subgraph.h"
-#include <fstream>
-#include <iostream>
-#include <algorithm>
-#include <chrono>
-#include <set>
-#include <map>
-#include <assert.h>
-#include <ext/hash_set>
-#include <climits>
-#include <math.h>
-#include <numeric>
-#include <queue>
-typedef int VertexID;
+#include "../recode_free_version/quasiclique.h"
 
 struct kc_value
 {
@@ -38,10 +23,11 @@ struct kc_value
 	set<VertexID> nbs2hop;
 };
 
-/*obinstream & operator>>(obinstream & m, kc_value & v)
+obinstream & operator>>(obinstream & m, kc_value & v)
 {
     m >> v.del;
     m >> v.nbs;
+    m >> v.nbs2hop;
     return m;
 }
 
@@ -49,6 +35,7 @@ ibinstream & operator<<(ibinstream & m, const kc_value & v)
 {
 	m << v.del;
     m << v.nbs;
+    m << v.nbs2hop;
     return m;
 }
 
@@ -56,6 +43,7 @@ ofbinstream & operator>>(ofbinstream & m, kc_value & v)
 {
     m >> v.del;
     m >> v.nbs;
+    m >> v.nbs2hop;
     return m;
 }
 
@@ -63,32 +51,11 @@ ifbinstream & operator<<(ifbinstream & m, const kc_value & v)
 {
 	m << v.del;
     m << v.nbs;
+    m << v.nbs2hop;
     return m;
-}*/
+}
 
-typedef set<VertexID> QC2HopValue;
-class QC2Hop:public Vertex <VertexID, QC2HopValue>
-{
-public:
-	virtual void set_degree(size_t & degree)
-	{
-		degree = value.size();
-	}
-};
-typedef Subgraph<QC2Hop> QCHopSubgraph;
-
-typedef vector<VertexID> QCValue;
-class QCVertex:public Vertex <VertexID, QCValue>
-{
-public:
-	virtual void set_degree(size_t & degree)
-	{
-		degree = value.size();
-	}
-};
-typedef Subgraph<QCVertex> QCSubgraph;
-
-
+//2hop prune
 void prune_2hop(VertexID id, kc_value & kc_val, map<VertexID, kc_value> & kc_g, int k, int min_size, vector<VertexID> & to_del){
 	kc_val.del = true;
 	to_del.push_back(id);
@@ -115,6 +82,7 @@ void prune_2hop(VertexID id, kc_value & kc_val, map<VertexID, kc_value> & kc_g, 
 	}
 }
 
+//1hop prune
 void prune_1hop(VertexID id, kc_value & kc_val, map<VertexID, kc_value> & kc_g, int k, vector<VertexID> & to_del){
 	kc_val.del = true;
 	to_del.push_back(id);

@@ -90,18 +90,30 @@ public:
     	return compute(task->subG, task->context, task->frontier_vertexes);
     }
 
+    FILE *gfpout;
     ofstream fout;
+    ofstream info_fout;
+    ofstream split_fout;
 
     void start(int thread_id)
     {
     	thread_rank= map_task.thread_rank = thread_id;
     	//------
-		char file[1000], no[40];
+		char file[1000], no[40], info_file[1000], split_file[1000];
 		long long fileSeqNo = 1;
 		strcpy(file, REPORT_DIR.c_str());
 		sprintf(no, "/%d_%d", _my_rank, thread_rank);
 		strcat(file, no);
-		fout.open(file);
+		gfpout = fopen(file, "wt");
+
+		strcpy(info_file, file);
+		strcat(info_file, "_info");
+		info_fout.open(info_file);
+
+		strcpy(split_file, file);
+		strcat(split_file, "_split");
+		split_fout.open(split_file);
+//		fout.open(file);
 		//------
     	main_thread = thread(&ComperT::run, this);
     }
@@ -109,7 +121,10 @@ public:
     virtual ~Comper()
     {
     	main_thread.join();
-    	fout.close();
+//    	fout.close();
+    	info_fout.close();
+    	split_fout.close();
+    	fclose(gfpout);
     }
 
     //load tasks from a file (from "global_file_list" to the task queue)
@@ -197,7 +212,7 @@ public:
 			int len_temp_vv = temp_verVec.size();
 			int i=0;
 			for(; i<len_temp_vv; i++)
-			{//call UDF to spawn tasks
+			{//call UDF to spawn tasks, if it is a bigTask, it will stop spawn.
 				if(task_spawn(temp_verVec[i])){
 					i++;
 					break;

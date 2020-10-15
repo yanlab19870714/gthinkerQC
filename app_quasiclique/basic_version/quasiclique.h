@@ -22,6 +22,17 @@ bool UPPER_BOUND_PRUNE = true;
 bool LOWER_BOUND_PRUNE = true;
 bool CRITICAL_VERTEX_PRUNE = true;
 
+typedef set<VertexID> QC2HopValue;
+class QC2Hop:public Vertex <VertexID, QC2HopValue>
+{
+public:
+	virtual void set_degree(size_t & degree)
+	{
+		degree = value.size();
+	}
+};
+typedef Subgraph<QC2Hop> QCHopSubgraph;
+
 typedef vector<VertexID> QCValue;
 //typedef Vertex<VertexID, QCValue> QCVertex;
 class QCVertex:public Vertex <VertexID, QCValue>
@@ -80,22 +91,9 @@ bool is_QC(QCSubgraph & gs) {
 
 //get the intersection of cand_exts and Nk(v)
 void filter_by_2hop(vector<QCVertex*> & new_cand, QCVertex * v,
-		QCSubgraph & g) {
+		QCSubgraph & g, QCHopSubgraph& g_2hop) {
 	//get the v's 2 hop neighbors
-	QCValue & nbs = v->value;
-	int adj_size = nbs.size();
-	set<VertexID> k_nbs_set; //wait to compare with set
-	for (int j = 0; j < adj_size; j++) {
-		int v_id = nbs[j];
-		k_nbs_set.insert(v_id);
-		QCVertex * nb_v = g.getVertex(v_id);
-		assert(nb_v != NULL);
-		QCValue & nb_nbs = nb_v->value;
-		int nb_nb_size = nb_nbs.size();
-		for (int k = 0; k < nb_nb_size; k++) {
-			k_nbs_set.insert(nb_nbs[k]);
-		}
-	}
+	set<VertexID>& k_nbs_set = g_2hop.getVertex(v->id)->value;
 
 	//get the intersection of the 2-hop neighbors and new_cand
 	//use a temp QCValue to hold the intersection
@@ -138,12 +136,9 @@ int get_lower_bound(int new_gs_size, int new_cand_size, vector<int> & subg_indeg
 
 	//get the loose lower bound L_min and tight lower bound L
 	int t = 0; //!!!!!! L_min = t
-	double rhs = _gamma * (new_gs_size - 1);
 	while (t <= new_cand_size) {
-		//if (indeg_min + t >= ceil(gamma * (new_gs_size + t - 1)))
-		if (indeg_min + t >= ceil(rhs))
+		if (indeg_min + t >= ceil(_gamma * (new_gs_size + t - 1)))
 			break;
-		rhs += _gamma;
 		t++;
 	}
 	//#### ???????????????
@@ -153,15 +148,14 @@ int get_lower_bound(int new_gs_size, int new_cand_size, vector<int> & subg_indeg
 		return t;
 	double l_left = accumulate(subg_indeg.begin(), subg_indeg.end(), 0) +
 		accumulate(cand_indeg_sorted.begin(), cand_indeg_sorted.begin() + t, 0);
-	double l_right = new_gs_size * ceil(rhs);
+	double l_right = new_gs_size * ceil(_gamma * (new_gs_size + t - 1));
 	//t = L
 	//if new_cand_size == 0 and t == 0, there will be a problem for "cand_indeg_sorted[t]".
 	//Make sure candidate is not empty before lb calculation.
 	while (t < new_cand_size) {
 		if (l_left >= l_right) break;
 		l_left += cand_indeg_sorted[t];
-		rhs += _gamma;
-		l_right = new_gs_size * ceil(rhs);
+		l_right = new_gs_size * ceil(_gamma * (new_gs_size + t - 1));
 		t++;
 	}
 	return t;
@@ -183,13 +177,11 @@ int get_upper_bound(int new_gs_size, int new_cand_size, vector<int> & subg_indeg
 	int U = U_min < new_cand_size ? U_min : new_cand_size;
 	double u_left = accumulate(subg_indeg.begin(), subg_indeg.end(), 0) +
 		accumulate(cand_indeg_sorted.begin(), cand_indeg_sorted.begin() + U, 0);
-	double rhs = _gamma * (new_gs_size + U - 1);
 	while (U >= 1) {
-		double u_right = new_gs_size * ceil(rhs);
+		double u_right = new_gs_size * ceil(_gamma * (new_gs_size + U - 1));
 		if (u_left >= u_right) break;
 		u_left -= cand_indeg_sorted[U - 1];
 		U--;
-		rhs -= _gamma;
 	}
 	return U;
 }
@@ -212,10 +204,22 @@ int cover_prune(QCSubgraph & gs, QCSubgraph & g, vector<QCVertex*> & cand_exts){
 	vector<VertexID> sub_set;
 	for(int i = 0; i < sub_size; i++) sub_set.push_back(sub_vertices[i].id);
 	sort(sub_set.begin(), sub_set.end());
+
+	set<int> X_set(sub_set.begin(), sub_set.end());
+	int indeg_threshold = ceil(sub_set.size()*_gamma);
+
 	//====== go through every u in cand(X) to check its cover set
 	for (int i = 0; i < cand_size; i++) {
 		QCVertex* u = cand_exts[i];
 		QCValue & cand_adj = u->value;
+
+		int indegX_u = 0;
+		for(auto v: cand_adj)
+			if(X_set.find(v) != X_set.end())
+				indegX_u++;
+		if(indegX_u < indeg_threshold)
+			continue;
+
 		int adj_size = cand_adj.size();
 		//------ compute cover_set = intersect(cand_X, adj_u)
 		vector<VertexID> cover_set(cand_size); //u's cover set
@@ -226,23 +230,46 @@ int cover_prune(QCSubgraph & gs, QCSubgraph & g, vector<QCVertex*> & cand_exts){
 		//------
 		if(cover_set.size() <= max_cover_size) continue;
 		//------ compute pruned_X = X - adj_u
-		vector<VertexID> pruned_X(sub_size);
-		it = set_intersection(sub_set.begin(), sub_set.end(),
-				cand_adj.begin(), cand_adj.end(), pruned_X.begin());
-		//cand_adj should've already been sorted when loading the graph
-		pruned_X.resize(it - pruned_X.begin());
-		//------ use pruned_X to filter cover_set
-		for(auto it1 = pruned_X.begin(); it1 != pruned_X.end(); it1++){
+		set<VertexID> u_X_set(cand_adj.begin(), cand_adj.end());
+		vector<VertexID> v_vec;
+		for(auto v:sub_set)
+			if(u_X_set.find(v) == u_X_set.end())
+				v_vec.push_back(v);
+
+		bool v_flag = true;
+		for(auto it1 = v_vec.begin(); it1 != v_vec.end(); it1++){
 			QCVertex* v = g.getVertex(*it1);
 			QCValue & v_adj = v->value;
-			//intersect v_adj and cover_set
-			vector<VertexID> new_cover_set(cover_set.size()); //u's cover set
-			auto it2 = set_intersection(v_adj.begin(), v_adj.end(),
-					cover_set.begin(), cover_set.end(), new_cover_set.begin());
-			//v_adj should've already been sorted when loading the graph
-			new_cover_set.resize(it2 - new_cover_set.begin());
-			cover_set.swap(new_cover_set);
+			int indegX_v = 0;
+			for(auto v: v_adj)
+				if(X_set.find(v) != X_set.end())
+					indegX_v++;
+			if(indegX_v < indeg_threshold)
+			{
+				cover_set.clear();
+				v_flag = false;
+				break;
+			}
 		}
+
+		//------ use pruned_X to filter cover_set
+		if(v_flag)
+		{
+			for(auto it1 = v_vec.begin(); it1 != v_vec.end(); it1++){
+				QCVertex* v = g.getVertex(*it1);
+				QCValue & v_adj = v->value;
+
+				//intersect v_adj and cover_set
+				//todo https://en.cppreference.com/w/cpp/algorithm/set_intersection
+				vector<VertexID> new_cover_set(cover_set.size()); //u's cover set
+				auto it2 = set_intersection(v_adj.begin(), v_adj.end(),
+						cover_set.begin(), cover_set.end(), new_cover_set.begin());
+				//v_adj should've already been sorted when loading the graph
+				new_cover_set.resize(it2 - new_cover_set.begin());
+				cover_set.swap(new_cover_set);
+			}
+		}
+
 		if(cover_set.size() > max_cover_size){
 			max_cover_size = cover_set.size();
 			max_cover_set.swap(cover_set);
@@ -267,7 +294,7 @@ int cover_prune(QCSubgraph & gs, QCSubgraph & g, vector<QCVertex*> & cand_exts){
 //true iff the case of extending S (excluding S itself) is pruned;
 //ext(S) is passed as a reference,
 //and some elements may be pruned when the function returns
-bool iterative_bounding(vector<QCVertex*>& new_cand, QCSubgraph& new_gs, ofstream & fout){
+bool iterative_bounding(vector<QCVertex*>& new_cand, QCSubgraph& new_gs, ofstream & fout, QCSubgraph& g){
 	//until Ly > Uy or Z is empty or cand_y is empty
 	 int lb, ub;
 	vector<QCVertex>& subg_vertices = new_gs.vertexes;
@@ -305,30 +332,37 @@ do {
 		if(ub < lb)
 			return true;
 
-		bool critical_hit = false;
-		if(CRITICAL_VERTEX_PRUNE){
-			//1. get candidate map
-			map<VertexID, QCVertex*> cand_map;
-			for (int j = 0; j < new_cand_size; j++)
-			{
-				QCVertex* v = new_cand[j];
-				cand_map[v->id] = v;
-			}
-			//2. find the critical vertex
-			int c_right = ceil(_gamma * (new_gs_size + lb - 1));
-			for (int j = 0; j < new_gs_size; j++) {
-				if (subg_indeg[j] + subg_exdeg[j] == c_right) {
-					critical_hit = true;
-					//#### check G(S) as in Lines~23--24 before expanding S if find the critical vertex v
-					if(new_gs_size >= min_size && is_QC(new_gs)){
-						output_qcq(new_gs, fout);
+		bool critical_hit;
+		do{
+			critical_hit = false;
+			if(CRITICAL_VERTEX_PRUNE){
+				//1. get candidate map
+				map<VertexID, QCVertex*> cand_map;
+				for (int j = 0; j < new_cand_size; j++)
+				{
+					QCVertex* v = new_cand[j];
+					cand_map[v->id] = v;
+				}
+				//2. find the critical vertex
+				int c_right = ceil(_gamma * (new_gs_size + lb - 1));
+				set<VertexID> crit_nbs_set;
+				for (int j = 0; j < new_gs_size; j++) {
+					if (subg_indeg[j] + subg_exdeg[j] == c_right) {
+						//#### check G(S) as in Lines~23--24 before expanding S if find the critical vertex v
+						if(new_gs_size >= min_size && is_QC(new_gs))
+							output_qcq(new_gs, fout);
+
+						QCValue & critical_nbs = g.getVertex(subg_vertices[j].id)->value;;
+						crit_nbs_set.insert(critical_nbs.begin(), critical_nbs.end());
 					}
-					//add the intersection of the critical vertex's adjacent list and candidate
-					QCValue & critical_nbs = subg_vertices[j].value;
-					int c_nbs_size = critical_nbs.size();
+				}
+
+				//add the intersection of the critical vertex's adjacent list and candidate
+				//add critical nbs into S; delete critical nbs from candidate
+				if(!crit_nbs_set.empty())
+				{
 					set<VertexID> intersection;
-					for (int k = 0; k < c_nbs_size; k++) {
-						VertexID c_nbs_id = critical_nbs[k];
+					for (VertexID c_nbs_id: crit_nbs_set) {
 						auto it = cand_map.find(c_nbs_id);
 						if (it != cand_map.end()) {
 							QCVertex* v = it->second;
@@ -337,65 +371,75 @@ do {
 							intersection.insert(v->id);
 						}
 					}
-					// remove it from candidate
-					vector<QCVertex*> new_cand_temp;
-					for (int k = 0; k < new_cand_size; k++) {
-						QCVertex* v = new_cand[k];
-						if (intersection.find(v->id) == intersection.end())
-							new_cand_temp.push_back(v);
+					if(!intersection.empty())
+					{
+						critical_hit = true;
+						// remove it from candidate
+						vector<QCVertex*> new_cand_temp;
+						for (int k = 0; k < new_cand_size; k++) {
+							QCVertex* v = new_cand[k];
+							if (intersection.find(v->id) == intersection.end())
+								new_cand_temp.push_back(v);
+						}
+						new_cand.swap(new_cand_temp);
 					}
-					new_cand.swap(new_cand_temp);
-					break;
+
+					if(new_cand.empty())
+					{
+						if(new_gs.vertexes.size() >= min_size && is_QC(new_gs))
+							output_qcq(new_gs, fout);
+						return true;
+					}
 				}
 			}
-		}
 
-		//#### If critical vertex prune never hit, do not need to recalculate the indeg_x, exdeg_x, indeg_cand
-		//------II. upper bound and lower bound prune
-		//update g_size and candidate size only if critical vertex pruning was executed.
-		if(critical_hit){
-			new_gs_size = new_gs.vertexes.size();
-			new_cand_size = new_cand.size();
-			//#### check the candidate size every time it is pruned. It will cause lb calculation error if not check here
-			if(new_cand_size == 0) break;
+			//#### If critical vertex prune never hit, do not need to recalculate the indeg_x, exdeg_x, indeg_cand
+			//------II. upper bound and lower bound prune
+			//update g_size and candidate size only if critical vertex pruning was executed.
+			if(critical_hit){
+				new_gs_size = new_gs.vertexes.size();
+				new_cand_size = new_cand.size();
+				//#### check the candidate size every time it is pruned. It will cause lb calculation error if not check here
+				if(new_cand_size == 0) break;
 
-			cand_indeg.assign(new_cand_size, 0);
-			subg_indeg.assign(new_gs_size, 0);
-			subg_exdeg.assign(new_gs_size, 0);
+				cand_indeg.assign(new_cand_size, 0);
+				subg_indeg.assign(new_gs_size, 0);
+				subg_exdeg.assign(new_gs_size, 0);
 
-			//1. update the in_degree of vertices in subgraph
-			for (int j = 0; j < new_gs_size; j++)
-				subg_indeg[j] = subg_vertices[j].value.size();
+				//1. update the in_degree of vertices in subgraph
+				for (int j = 0; j < new_gs_size; j++)
+					subg_indeg[j] = subg_vertices[j].value.size();
 
-			//2. update the in_degree of every vertex in candidate
-			//and the ex_degree of every vertex in subgraph
-			get_cand_indeg(cand_indeg, subg_exdeg, new_gs, new_cand);
+				//2. update the in_degree of every vertex in candidate
+				//and the ex_degree of every vertex in subgraph
+				get_cand_indeg(cand_indeg, subg_exdeg, new_gs, new_cand);
 
-			//#### do not sort X-candidate twice
-			//presort cand_indeg for lb and ub calculation
-			vector<int> cand_indeg_sorted = cand_indeg;
-			sort(cand_indeg_sorted.begin(), cand_indeg_sorted.end(), greater<int>());
+				//#### do not sort X-candidate twice
+				//presort cand_indeg for lb and ub calculation
+				vector<int> cand_indeg_sorted = cand_indeg;
+				sort(cand_indeg_sorted.begin(), cand_indeg_sorted.end(), greater<int>());
 
-			//3. update the update lower bound
-			lb = LOWER_BOUND_PRUNE ? get_lower_bound(new_gs_size, new_cand_size, subg_indeg,
-					cand_indeg_sorted) : 0;
-			//#### return true if can't find valid t
-			if (lb > new_cand_size)
-				return true;
-
-			//4. update the update upper bound
-			ub = UPPER_BOUND_PRUNE ? get_upper_bound(new_gs_size, new_cand_size, subg_indeg,
-							subg_exdeg, cand_indeg_sorted) : new_cand_size;
-			//#### check G(S) and return true if can't find valid t
-			if (ub < 1){
-				if(new_gs_size >= min_size && is_QC(new_gs)){
-					output_qcq(new_gs, fout);
+				//3. update the update lower bound
+				lb = LOWER_BOUND_PRUNE ? get_lower_bound(new_gs_size, new_cand_size, subg_indeg,
+						cand_indeg_sorted) : 0;
+				//#### return true if can't find valid t
+				if (lb > new_cand_size)
 					return true;
+
+				//4. update the update upper bound
+				ub = UPPER_BOUND_PRUNE ? get_upper_bound(new_gs_size, new_cand_size, subg_indeg,
+								subg_exdeg, cand_indeg_sorted) : new_cand_size;
+				//#### check G(S) and return true if can't find valid t
+				if (ub < 1){
+					if(new_gs_size >= min_size && is_QC(new_gs)){
+						output_qcq(new_gs, fout);
+						return true;
+					}
 				}
+				if(ub < lb)
+					return true;
 			}
-			if(ub < lb)
-				return true;
-		}
+		} while(critical_hit);
 
 		//--------III check vertex in vertex set (Theorems 4,6 and 8)
 		bool cond;
@@ -486,9 +530,56 @@ if(new_cand_size == 0){
 return false;
 }
 
+struct deg_sorter{
+	QCVertex* v;
+	int indeg = 0;
+	int exdeg = 0;
+};
+bool comp(const deg_sorter &x, const deg_sorter &y)
+{
+	if(x.indeg == y.indeg)
+		return x.exdeg < y.exdeg;
+	else
+		return x.indeg < y.indeg;
+}
+
+void get_cand_deg(vector<QCVertex*>& cand, QCSubgraph& X_g, vector<deg_sorter>& cand_deg)
+{
+	set<VertexID> cand_set;
+	for(auto v:cand)
+		cand_set.insert(v->id);
+
+	int n_cand = cand.size();
+	hash_map<VertexID, int> & Xg_map = X_g.vmap;
+	for (int j = 0; j < n_cand; j++)
+	{
+		cand_deg[j].v = cand[j];
+		QCValue & cand_j_adj = cand[j]->value;
+		int adj_size = cand_j_adj.size();
+		for (int k = 0; k < adj_size; k++)
+		{
+			VertexID nb = cand_j_adj[k];
+			if(Xg_map.find(nb) != Xg_map.end())
+				cand_deg[j].indeg++;
+			if(cand_set.find(nb) != cand_set.end())
+				cand_deg[j].exdeg++;
+		}
+	}
+}
+
+
+void sort_deg(vector<QCVertex*> & cand_exts, QCSubgraph & gs){
+	vector<deg_sorter> cand_deg(cand_exts.size());
+	get_cand_deg(cand_exts, gs, cand_deg);
+	sort(cand_deg.begin(), cand_deg.end(),comp);
+	cand_exts.clear();
+	for(auto c: cand_deg)
+		cand_exts.push_back(c.v);
+}
 
 //QCQ
-bool QCQ(QCSubgraph & gs, QCSubgraph & g, vector<QCVertex*> & cand_exts, ofstream & fout) {
+bool QCQ(QCSubgraph & gs, QCSubgraph & g, vector<QCVertex*> & cand_exts, ofstream & fout, QCHopSubgraph& g_2hop) {
+	sort_deg(cand_exts, gs);
 	int cand_size = cand_exts.size();
 	int gs_size = gs.vertexes.size();
 	bool bhas_qclq = false;
@@ -520,7 +611,7 @@ bool QCQ(QCSubgraph & gs, QCSubgraph & g, vector<QCVertex*> & cand_exts, ofstrea
 		vector<QCVertex*> new_cand;
 		new_cand.insert(new_cand.begin(), cand_exts.begin() + i + 1,
 				cand_exts.end());
-		filter_by_2hop(new_cand, v, g);
+		filter_by_2hop(new_cand, v, g, g_2hop);
 		int new_gs_size = new_gs.vertexes.size();
 		int new_cand_size = new_cand.size();
 
@@ -532,12 +623,12 @@ bool QCQ(QCSubgraph & gs, QCSubgraph & g, vector<QCVertex*> & cand_exts, ofstrea
 
 		} else {
 			//#### no need to pass lb and ub
-			bool ext_prune = iterative_bounding(new_cand, new_gs, fout);
+			bool ext_prune = iterative_bounding(new_cand, new_gs, fout, g);
 			new_gs_size = new_gs.vertexes.size();
 			new_cand_size = new_cand.size();
 			//-----------------------------------
 			if(!ext_prune && new_cand_size + new_gs_size >= min_size){
-				bool bhas_super_qclq = QCQ(new_gs, g, new_cand, fout);
+				bool bhas_super_qclq = QCQ(new_gs, g, new_cand, fout, g_2hop);
 				bhas_qclq = bhas_qclq || bhas_super_qclq;
 				if (!bhas_super_qclq && new_gs_size >= min_size && is_QC(new_gs)) {
 					bhas_qclq = true;

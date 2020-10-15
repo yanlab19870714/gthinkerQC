@@ -1,5 +1,5 @@
 CCOMPILE=mpic++
-CPPFLAGS= -I$(HADOOP_HOME)/include -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux -I ../system -Wno-deprecated -O2
+CPPFLAGS= -I$(HADOOP_HOME)/include -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux -I ../../system -Wno-deprecated -O2
 LIB = -L$(HADOOP_HOME)/lib/native
 LDFLAGS = -lhdfs
 

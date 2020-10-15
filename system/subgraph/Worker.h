@@ -141,7 +141,7 @@ public:
     //=======================================================
     //constructor & destructor
 
-    Worker(int comper_num, string local_disk_path = "buffered_tasks", string report_path = "report")
+    Worker(int comper_num, string local_disk_path = "/opt/hadoop/dfs/yan_share/guimu/buffered_tasks", string report_path = "/opt/hadoop/dfs/yan_share/guimu/report")
     {
     	num_compers = comper_num;
     	TASK_DISK_BUFFER_DIR = local_disk_path;
@@ -339,7 +339,7 @@ public:
 	};
 
 	//UDF for stea1ing seed tasks
-	virtual void task_spawn(VertexT * v, vector<TaskT> & tvec) = 0;
+	virtual void task_spawn(VertexT * v, vector<TaskT*> & tvec) = 0;
 
 	/*//=== deprecated, 50 vertices may just spawn 0 task or 2 tasks (etc.), so the quota of 50 is wasted during plan generation
 	//get tasks from local-table
@@ -408,13 +408,13 @@ public:
 		return true;
 	}*/
 	//temporary for bigtask revision
-	bool locTable2vec(vector<TaskT> & tvec){
-		return false;
-	}
+//	bool locTable2vec(vector<TaskT> & tvec){
+//		return false;
+//	}
 
 	//get big tasks from disk files
 	//returns false if "global_bigTask_fileList" is empty
-	bool bigTask_file2vec(vector<TaskT> & tvec)
+	bool bigTask_file2vec(vector<TaskT*> & tvec)
 	{
 		string file;
 		bool succ = global_bigTask_fileList.dequeue(file);
@@ -425,12 +425,11 @@ public:
 		{
 			global_bigTask_file_num --;
 			ofbinstream in(file.c_str());
-			TaskT dummy;
 			while(!in.eof())
 			{
-				TaskT task;
-				tvec.push_back(dummy);
-				in >> tvec.back();
+				TaskT * task = new TaskT;
+				in >> *task;
+				tvec.push_back(task);
 			}
 			in.close();
 			//------
@@ -554,7 +553,7 @@ public:
 			//------
 			priority_queue<max_heap_entry> max_heap;
 			priority_queue<min_heap_entry> min_heap;
-			avg_num = accumulate(remain_vec.begin(), remain_vec.end(), 0)/remain_vec.size();
+			avg_num = ceil((float)accumulate(remain_vec.begin(), remain_vec.end(), 0)/remain_vec.size());
 			for(int i=0; i<_num_workers; i++)
 			{
 				if(remain_vec[i] > avg_num)
@@ -741,12 +740,14 @@ public:
 				}
 				else
 				{
-					vector<TaskT> tvec;
+					vector<TaskT*> tvec;
 					if(get_remaining_task_num() > avg_num)
 					//check this since time has passed, and more tasks may have been processed
 					//send empty tvec if no longer a task heavy-hitter
 						bigTask_file2vec(tvec);
 					send_data(tvec, other, STATUS_CHANNEL); //send even if it's empty
+					for(int i=0; i<tvec.size(); i++)
+						delete tvec[i];
 				}
 			}
 		}
@@ -769,7 +770,7 @@ public:
 				else
 				{
 					int steal_num = my_single_steal_list[i].num;
-					vector<TaskT> tvec;
+					vector<TaskT*> tvec;
 					for(int i=0; i<steal_num; i++)
 					{
 						if(get_remaining_task_num() <= avg_num) break;
@@ -788,10 +789,38 @@ public:
 							btq.pop_front();
 						}
 						bigtask_que_lock.unlock();
-						if(task != NULL) tvec.push_back(*task);
+						if(task != NULL) tvec.push_back(task);
 					}
 					send_data(tvec, other, STATUS_CHANNEL); //send even if it's empty
+					for(int i=0; i<tvec.size(); i++)
+						delete tvec[i];
 				}
+//				else
+//				{
+//					int steal_num = my_single_steal_list[i].num;
+//					vector<TaskT> tvec;
+//					for(int i=0; i<steal_num; i++)
+//					{
+//						if(get_remaining_task_num() <= avg_num) break;
+//						//check this since time has passed, and more tasks may have been processed
+//						//send empty task-vec if no longer a task heavy-hitter
+//
+//						TaskT * task = NULL;
+//						TaskQueue& btq = q_bigtask();
+//						bigtask_que_lock.lock();
+//						if(btq.size() <= BIG_TASK_FLUSH_BATCH)
+//							file2bigTask_queue();
+//
+//						if(!btq.empty())
+//						{
+//							task = btq.front();
+//							btq.pop_front();
+//						}
+//						bigtask_que_lock.unlock();
+//						if(task != NULL) tvec.push_back(*task);
+//					}
+//					send_data(tvec, other, STATUS_CHANNEL); //send even if it's empty
+//				}
 			}
 		}
 

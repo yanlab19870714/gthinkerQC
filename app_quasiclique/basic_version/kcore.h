@@ -14,18 +14,20 @@
 //## limitations under the License.
 //########################################################################
 
-#include "quasiclique.h"
+#include "../basic_version/quasiclique.h"
 
 struct kc_value
 {
 	bool del;
 	set<VertexID> nbs;
+	set<VertexID> nbs2hop;
 };
 
 obinstream & operator>>(obinstream & m, kc_value & v)
 {
     m >> v.del;
     m >> v.nbs;
+    m >> v.nbs2hop;
     return m;
 }
 
@@ -33,6 +35,7 @@ ibinstream & operator<<(ibinstream & m, const kc_value & v)
 {
 	m << v.del;
     m << v.nbs;
+    m << v.nbs2hop;
     return m;
 }
 
@@ -40,6 +43,7 @@ ofbinstream & operator>>(ofbinstream & m, kc_value & v)
 {
     m >> v.del;
     m >> v.nbs;
+    m >> v.nbs2hop;
     return m;
 }
 
@@ -47,11 +51,39 @@ ifbinstream & operator<<(ifbinstream & m, const kc_value & v)
 {
 	m << v.del;
     m << v.nbs;
+    m << v.nbs2hop;
     return m;
 }
 
+//2hop prune
+void prune_2hop(VertexID id, kc_value & kc_val, map<VertexID, kc_value> & kc_g, int k, int min_size, vector<VertexID> & to_del){
+	kc_val.del = true;
+	to_del.push_back(id);
+	set<VertexID> & nbs2hop = kc_val.nbs2hop;
+	// 2hop is the superset of 1hop
+	for(auto it = nbs2hop.begin(); it != nbs2hop.end(); ++it){
+		int nb_id = *it;
+		auto itr = kc_g.find(nb_id);
+		if(itr != kc_g.end() && itr->second.del == false){
+			kc_value & nb_val = itr->second;
+			set<VertexID> & nb_nbs = nb_val.nbs;
+			set<VertexID> & nb_nbs2hop = nb_val.nbs2hop;
+			//delete v from its nb's 2hop set
+			nb_nbs2hop.erase(id);
+			//delete v from its nb's 1hop set
+			auto nb_it = nb_nbs.find(id);
+			if(nb_it != nb_nbs.end())//maybe not 1hop neighbor
+				nb_nbs.erase(nb_it);
+			//prune recursively
+			if(nb_nbs.size() < k || nb_nbs2hop.size() < min_size - 1)
+				if(!nb_val.del)
+					prune_2hop(nb_id, nb_val, kc_g, k, min_size, to_del);
+		}
+	}
+}
 
-void prune(VertexID id, kc_value & kc_val, map<VertexID, kc_value> & kc_g, int k, vector<VertexID> & to_del){
+//1hop prune
+void prune_1hop(VertexID id, kc_value & kc_val, map<VertexID, kc_value> & kc_g, int k, vector<VertexID> & to_del){
 	kc_val.del = true;
 	to_del.push_back(id);
 	set<VertexID> & nbs = kc_val.nbs;
@@ -63,7 +95,7 @@ void prune(VertexID id, kc_value & kc_val, map<VertexID, kc_value> & kc_g, int k
 			set<VertexID> & nb_nbs = nb_val.nbs;
 			nb_nbs.erase(id);
 			if(nb_nbs.size() < k)
-				if(!nb_val.del) prune(nb_id, nb_val, kc_g, k, to_del);
+				if(!nb_val.del) prune_1hop(nb_id, nb_val, kc_g, k, to_del);
 		}
 	}
 }
@@ -89,7 +121,7 @@ void k_core(QCSubgraph & g, int min_deg, map<int, int> & result_map){
 		{
 			kc_value & val = it->second;
 			if(val.nbs.size() < k)
-				if(!val.del) prune(it->first, val, kc_g, k, to_del);
+				if(!val.del) prune_1hop(it->first, val, kc_g, k, to_del);
 		}
 		//see whether root_id is still not pruned
 		if(kc_g[root_id].del){
@@ -117,5 +149,37 @@ void k_core(QCSubgraph & g, int min_deg, map<int, int> & result_map){
 		//save the results
 		result_map[k] = kc_g.size();
 		k++;
+	}
+}
+void map_k_core(map<VertexID, kc_value> kc_g, int min_deg, map<int, int, greater<int>> & result_map){
+	int k = min_deg;
+	VertexID root_id = kc_g.begin()->first;
+	while(true){
+		//prune vertices with degree < k (set field "del")
+		vector<VertexID> to_del;
+		for(auto it = kc_g.begin(); it != kc_g.end(); ++it)
+		{
+			kc_value & val = it->second;
+			if(val.nbs.size() < k)
+				if(!val.del) prune_1hop(it->first, val, kc_g, k, to_del);
+		}
+		//see whether root_id is still not pruned
+//		if(kc_g[root_id].del){
+//			/*cout<<"kcore is "<<k-1<<endl;
+//			cout<<"root id is deleted";*/
+//			return;
+//		}
+		//do the actual deletes
+		for(auto it = to_del.begin(); it != to_del.end(); ++it) kc_g.erase(*it);
+
+		//-----------debug--------*/
+		//save the results
+		if(!kc_g.empty())
+		{
+			result_map[k] = kc_g.size();
+			k++;
+		}
+		else
+			return;
 	}
 }
