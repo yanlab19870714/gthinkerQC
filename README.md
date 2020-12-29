@@ -21,7 +21,7 @@ G-thinker fundamentally changes the data-intensive design of existing Big Data f
 G-thinker works perfectly on all applications except for quasi-clique mining, where we find that some tasks can be so expensive that if we maintain local queue for each thread, head of line blocking will happen leading to low CPU utilization. We thus add global task queue and new task stealing strategy to move "big" tasks forward ASAP.
 
 ### Documentation
-We maintain detailed documentation in our awesome G-thinker system website: http://www.cs.uab.edu/yanda/gthinker.
+We maintain detailed documentation in our awesome G-thinker system website: http://bit.ly/gthinker.
 
 It contains detailed steps for deployment and programming which also applies to G-thinker+
 
