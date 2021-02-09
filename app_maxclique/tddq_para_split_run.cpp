@@ -541,27 +541,26 @@ public:
         return v;
     }
 
-    virtual void task_spawn(VertexT * v, vector<TaskT> & tcollector)
+    virtual void task_spawn(VertexT * v, vector<TaskT*> & tcollector)
 	{
     	CliqueAgg* agg = get_aggregator();
 		VSet Qmax;
 		agg->finishPartial(Qmax);//cannot directly use agg->Qmax without rdlock it first
 		if(Qmax.size() >= 1 + v->value.size()) return; //==========> pruning with Qmax right at spawning
 		//------
-		TaskT t;
-		tcollector.push_back(t);
-		TaskT & task = tcollector.back();
-		task.context.round = 1;
-		task.context.stop_loc = 0;
-		task.context.context.push_back(v->id); //====> this is Q = {v}
+		TaskT* task = new TaskT;
+		task->context.round = 1;
+		task->context.stop_loc = 0;
+		task->context.context.push_back(v->id); //====> this is Q = {v}
 		for(int i=0; i<v->value.size(); i++)
 		{
 			VertexID nb = v->value[i];
-			task.pull(nb);
+			task->pull(nb);
 		}
-		task.context.start = 0;
-		task.context.end = task.to_pull.size();
-		task.context.to_split = false;
+		task->context.start = 0;
+		task->context.end = task->to_pull.size();
+		task->context.to_split = false;
+		tcollector.push_back(task);
 	}
 };
 

@@ -46,6 +46,6 @@ mpiexec -n 16 -f host_file ./run recoded_data_on_hdfs thread_number gamma minsiz
 ========== maximal check ========== 
 The code to get the maximal results is under maximal_check folder. 
 1) make 
-2) ./quasiCliques quasiclique_result output_name 
+2) ./quasiCliques quasiclique_result_file output_name 
 
 

@@ -68,7 +68,7 @@ public:
 
     TaskMapT& get_big_maptask(){// get the global big map_task
             	return *(TaskMapT *)big_map_task;
-        }
+    }
 
     //UDF1
     virtual bool task_spawn(VertexT * v) = 0; //call add_task() inside, will flush tasks to disk if queue overflows
@@ -90,30 +90,20 @@ public:
     	return compute(task->subG, task->context, task->frontier_vertexes);
     }
 
-    FILE *gfpout;
-    ofstream fout;
-    ofstream info_fout;
-    ofstream split_fout;
+	FILE *gfpout;
+    //ofstream fout;
 
     void start(int thread_id)
     {
     	thread_rank= map_task.thread_rank = thread_id;
     	//------
-		char file[1000], no[40], info_file[1000], split_file[1000];
+		char file[1000], no[40];
 		long long fileSeqNo = 1;
 		strcpy(file, REPORT_DIR.c_str());
 		sprintf(no, "/%d_%d", _my_rank, thread_rank);
 		strcat(file, no);
 		gfpout = fopen(file, "wt");
-
-		strcpy(info_file, file);
-		strcat(info_file, "_info");
-		info_fout.open(info_file);
-
-		strcpy(split_file, file);
-		strcat(split_file, "_split");
-		split_fout.open(split_file);
-//		fout.open(file);
+		//fout.open(file);
 		//------
     	main_thread = thread(&ComperT::run, this);
     }
@@ -121,9 +111,7 @@ public:
     virtual ~Comper()
     {
     	main_thread.join();
-//    	fout.close();
-    	info_fout.close();
-    	split_fout.close();
+    	//fout.close();
     	fclose(gfpout);
     }
 
@@ -212,7 +200,7 @@ public:
 			int len_temp_vv = temp_verVec.size();
 			int i=0;
 			for(; i<len_temp_vv; i++)
-			{//call UDF to spawn tasks, if it is a bigTask, it will stop spawn.
+			{//call UDF to spawn tasks, if it is a bigTask, it will stop spawning.
 				if(task_spawn(temp_verVec[i])){
 					i++;
 					break;
@@ -367,8 +355,7 @@ public:
     void add_task(TaskT * task) //!!! do not use "task" after this call !!! (may already be serialized to disk)
     {
     	if(is_bigtask(task)){
-    		unique_lock<mutex> lck(bigtask_que_lock);
-    		add_bigTask_nolock(task);
+    		add_bigTask(task);
     	} else add_smallTask(task);
     }
 
@@ -400,31 +387,43 @@ public:
 		q_task.push_back(task);
     }
 
-    void add_bigTask_nolock(TaskT * task)
+    void add_bigTask(TaskT * task)
     {
+		vector<TaskT *> bigTask_vec;
+
 		TaskQueue& btq = q_bigtask();
+		bigtask_que_lock.lock();
 		//get the ref of global big task queue
 		if(btq.size() == BIG_TASK_QUEUE_CAPACITY){
-			set_bigTask_fname();
-			ifbinstream bigTask_out(fname);
 			int i = 0;
 			while(i < BIG_TASK_FLUSH_BATCH)
 			{
 				//get task at the tail
-				TaskT * t = btq.back();
+				bigTask_vec.push_back(btq.back());
 				btq.pop_back();
+				i++;
+			}
+		}
+		btq.push_back(task);
+		bigtask_que_lock.unlock();
+
+		if(!bigTask_vec.empty())
+		{
+			set_bigTask_fname();
+			ifbinstream bigTask_out(fname);
+			for (int i = 0; i < bigTask_vec.size(); i++)
+			{
+				TaskT * t = bigTask_vec[i];
 				//stream to file
 				bigTask_out << t;
 				//release from memory
 				delete t;
-				i++;
 			}
 			bigTask_out.close();
 			global_bigTask_fileList.enqueue(fname);
 			global_bigTask_file_num ++;
 		}
-		btq.push_back(task);
-    }
+	}
 
     //part 1's logic: fetch a task from task-map's "task_buf", process it, and add to q_task (flush to disk if necessary)
     bool push_task_from_taskmap() //returns whether a task is fetched from taskmap
@@ -454,8 +453,7 @@ public:
     	task->unlock_all();
     	if(go != false)
     	{//add task to queue
-    		unique_lock<mutex> lck(bigtask_que_lock);
-    		add_bigTask_nolock(task);
+    		add_bigTask(task);
     	}
         else
         {

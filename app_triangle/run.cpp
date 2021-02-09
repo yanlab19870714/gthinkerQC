@@ -171,19 +171,18 @@ public:
         return v;
     }
 
-    virtual void task_spawn(VertexT * v, vector<TriangleTask> & tcollector)
+    virtual void task_spawn(VertexT * v, vector<TriangleTask*> & tcollector)
 	{
     	if(v->value.size() < 2) return;
-    	TriangleTask t;
-    	tcollector.push_back(t);
-    	TriangleTask & task = tcollector.back();
-		task.subG.addVertex(*v);
+    	TriangleTask* task = new TriangleTask;
+		task->subG.addVertex(*v);
 		for(int i=0; i<v->value.size() - 1; i++) //-1 since we do not need to pull the largest vertex
 		{
 			VertexID nb = v->value[i];
-			task.pull(nb);
+			task->pull(nb);
 		}
-		task.context = v->value.back();
+		task->context = v->value.back();
+		tcollector.push_back(task);
 	}
 };
 

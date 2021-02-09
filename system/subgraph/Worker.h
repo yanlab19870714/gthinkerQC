@@ -141,7 +141,7 @@ public:
     //=======================================================
     //constructor & destructor
 
-    Worker(int comper_num, string local_disk_path = "/opt/hadoop/dfs/yan_share/guimu/buffered_tasks", string report_path = "/opt/hadoop/dfs/yan_share/guimu/report")
+    Worker(int comper_num, string local_disk_path = "buffered_tasks", string report_path = "report")
     {
     	num_compers = comper_num;
     	TASK_DISK_BUFFER_DIR = local_disk_path;
@@ -408,9 +408,11 @@ public:
 		return true;
 	}*/
 	//temporary for bigtask revision
-//	bool locTable2vec(vector<TaskT> & tvec){
-//		return false;
-//	}
+	/*
+	bool locTable2vec(vector<TaskT> & tvec){
+		return false;
+	}
+	*/
 
 	//get big tasks from disk files
 	//returns false if "global_bigTask_fileList" is empty
@@ -425,6 +427,7 @@ public:
 		{
 			global_bigTask_file_num --;
 			ofbinstream in(file.c_str());
+			TaskT dummy;
 			while(!in.eof())
 			{
 				TaskT * task = new TaskT;
@@ -472,31 +475,40 @@ public:
 
 	void add_bigTask(TaskT * task)
 	{
-		unique_lock<mutex> lck(bigtask_que_lock);
+		vector<TaskT *> bigTask_vec;
+
 		TaskQueue& btq = q_bigtask();
+		bigtask_que_lock.lock();
 		//get the ref of global big task queue
 		if(btq.size() == BIG_TASK_QUEUE_CAPACITY){
-			//@@@@@
-			//cout<<"!!!!!!save the file"<<endl;
-			set_bigTask_fname();
-			ifbinstream bigTask_out(fname);
 			int i = 0;
 			while(i < BIG_TASK_FLUSH_BATCH)
 			{
 				//get task at the tail
-				TaskT * t = btq.back();
+				bigTask_vec.push_back(btq.back());
 				btq.pop_back();
+				i++;
+			}
+		}
+		btq.push_back(task);
+		bigtask_que_lock.unlock();
+
+		if(!bigTask_vec.empty())
+		{
+			set_bigTask_fname();
+			ifbinstream bigTask_out(fname);
+			for (int i = 0; i < bigTask_vec.size(); i++)
+			{
+				TaskT * t = bigTask_vec[i];
 				//stream to file
 				bigTask_out << t;
 				//release from memory
 				delete t;
-				i++;
 			}
 			bigTask_out.close();
 			global_bigTask_fileList.enqueue(fname);
 			global_bigTask_file_num ++;
 		}
-		btq.push_back(task);
 	}
 
 	//load bigtasks from a file (from "global_bigTask_fileList" to the task queue)
@@ -795,32 +807,6 @@ public:
 					for(int i=0; i<tvec.size(); i++)
 						delete tvec[i];
 				}
-//				else
-//				{
-//					int steal_num = my_single_steal_list[i].num;
-//					vector<TaskT> tvec;
-//					for(int i=0; i<steal_num; i++)
-//					{
-//						if(get_remaining_task_num() <= avg_num) break;
-//						//check this since time has passed, and more tasks may have been processed
-//						//send empty task-vec if no longer a task heavy-hitter
-//
-//						TaskT * task = NULL;
-//						TaskQueue& btq = q_bigtask();
-//						bigtask_que_lock.lock();
-//						if(btq.size() <= BIG_TASK_FLUSH_BATCH)
-//							file2bigTask_queue();
-//
-//						if(!btq.empty())
-//						{
-//							task = btq.front();
-//							btq.pop_front();
-//						}
-//						bigtask_que_lock.unlock();
-//						if(task != NULL) tvec.push_back(*task);
-//					}
-//					send_data(tvec, other, STATUS_CHANNEL); //send even if it's empty
-//				}
 			}
 		}
 

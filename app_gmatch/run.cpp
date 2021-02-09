@@ -464,27 +464,30 @@ public:
         return v;
     }
 
-    virtual void task_spawn(VertexT * v, vector<GMatchTask> & tcollector)
+    virtual void task_spawn(VertexT * v, vector<GMatchTask*> & tcollector)
 	{
     	if(v->value.l != 'a') return;
-    	GMatchTask t;
-    	addNode(t.subG, *v);
-    	t.context = 1;
+    	TaskT* t = new TaskT;
+    	addNode(t->subG, *v);
+    	t->context = 1;
 		vector<AdjItem> & nbs = v->value.adj;
 		bool has_b = false;
 		bool has_c = false;
 		for(int i=0; i<nbs.size(); i++)
-			if(nbs[i].l == 'b')
-			{
-				t.pull(nbs[i].id);
-				has_b = true;
-			}
-			else if(nbs[i].l == 'c')
-			{
-				t.pull(nbs[i].id);
-				has_c = true;
-			}
-		if(has_b && has_c) tcollector.push_back(t);
+		if(nbs[i].l == 'b')
+		{
+			t->pull(nbs[i].id);
+			has_b = true;
+		}
+		else if(nbs[i].l == 'c')
+		{
+			t->pull(nbs[i].id);
+			has_c = true;
+		}
+		if(has_b && has_c)
+			tcollector.push_back(t);
+		else
+			delete t;
 	}
 };
 

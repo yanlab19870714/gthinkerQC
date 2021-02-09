@@ -453,24 +453,23 @@ public:
         return v;
     }
 
-    virtual void task_spawn(VertexT * v, vector<TaskT> & tcollector)
+    virtual void task_spawn(VertexT * v, vector<TaskT*> & tcollector)
 	{
     	CliqueAgg* agg = get_aggregator();
 		VSet Qmax;
 		agg->finishPartial(Qmax);//cannot directly use agg->Qmax without rdlock it first
 		if(Qmax.size() >= 1 + v->value.size()) return; //==========> pruning with Qmax right at spawning
 		//------
-		TaskT t;
-		tcollector.push_back(t);
-		TaskT & task = tcollector.back();
-		task.context.round = 1;
-		task.context.stop_loc = 0;
-		task.context.context.push_back(v->id); //====> this is Q = {v}
+		TaskT* task = new TaskT;
+		task->context.round = 1;
+		task->context.stop_loc = 0;
+		task->context.context.push_back(v->id); //====> this is Q = {v}
 		for(int i=0; i<v->value.size(); i++)
 		{
 			VertexID nb = v->value[i];
-			task.pull(nb);
+			task->pull(nb);
 		}
+		tcollector.push_back(task);
 	}
 };
 
@@ -479,7 +478,7 @@ int main(int argc, char* argv[])
     init_worker(&argc, &argv);
     WorkerParams param;
     if(argc != 6){
-    	cout<<"arg1 = input path in HDFS, arg2 = number of threads, arg3 = split-time threshold, arg4 = BIGTASK_THRESHOLD"<<endl;
+    	cout<<"arg1 = input path in HDFS, arg2 = number of threads, arg3 = split-time threshold, arg4 = BIGTASK_THRESHOLD, arg5 = Split Size in expand()"<<endl;
     	return -1;
     }
     param.input_path = argv[1];  //input path in HDFS
