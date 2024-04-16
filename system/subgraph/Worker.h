@@ -550,7 +550,7 @@ public:
 			send_data(get_remaining_task_num(), MASTER_RANK, STATUS_CHANNEL);
 			recv_data<vector<steal_plan> >(MASTER_RANK, STATUS_CHANNEL, my_single_steal_list);
 			recv_data<vector<int> >(MASTER_RANK, STATUS_CHANNEL, my_batch_steal_list);
-			recv_data<int>(MASTER_RANK, STATUS_CHANNEL, avg_num);
+			recv_data<size_t>(MASTER_RANK, STATUS_CHANNEL, avg_num);
 		}
 		else
 		{
